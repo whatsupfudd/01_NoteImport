@@ -1,0 +1,13 @@
+snapshot:
+  url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/22/44.yaml
+
+packages:
+- .
+
+#
+# extra-deps: []
+
+
+# Control whether we use the GHC we find on the path
+system-ghc: true
+#
