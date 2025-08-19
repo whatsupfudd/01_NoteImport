@@ -59,7 +59,7 @@ mergeOptions cli file env = do
   parseOptions cli file = do
     mconf cli.debug $ \nVal s -> s { Rt.debug = nVal }
     innerConf (\nVal s -> s { Rt.pgDbConf = nVal }) parsePgDb Rt.defaultPgDbConf file.db
-    parseNotionOpt file.notionDef
+    parseNotionOpt file.notion
     pure $ Right ()
 
   parsePgDb :: Fo.PgDbOpts -> PgDbOptIOSt

@@ -51,6 +51,7 @@ library
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
     , directory
     , filepath
     , gitrev
@@ -62,6 +63,7 @@ library
     , mtl
     , optparse-applicative
     , postgresql-binary
+    , scientific
     , text
     , time
     , unix
@@ -85,6 +87,7 @@ executable noteimp
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
     , directory
     , filepath
     , gitrev
@@ -97,6 +100,7 @@ executable noteimp
     , noteimp
     , optparse-applicative
     , postgresql-binary
+    , scientific
     , text
     , time
     , unix
@@ -121,6 +125,7 @@ test-suite noteimp-test
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
     , directory
     , filepath
     , gitrev
@@ -133,6 +138,7 @@ test-suite noteimp-test
     , noteimp
     , optparse-applicative
     , postgresql-binary
+    , scientific
     , text
     , time
     , unix

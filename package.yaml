@@ -27,6 +27,7 @@ dependencies:
   - text
   - time
   - vector
+  - containers
   # For YAML (config file):
   - yaml
   - directory
@@ -48,6 +49,8 @@ dependencies:
   - hasql
   - hasql-th
   - hasql-pool
+  # For scientific:
+  - scientific
 
 default-extensions:
 - OverloadedStrings

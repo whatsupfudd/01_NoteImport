@@ -21,7 +21,7 @@ import qualified Data.Yaml as Yaml
 data FileOptions = FileOptions {
   debug :: Maybe Int
   , db :: Maybe PgDbOpts
-  , notionDef :: Maybe NotionDef
+  , notion :: Maybe NotionDef
  }
  deriving stock (Show, Generic)
 
