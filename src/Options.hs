@@ -8,9 +8,8 @@ where
 
 import Control.Monad.State ( MonadState (put), MonadIO, runStateT, State, StateT, modify, lift, liftIO )
 import Control.Monad.Except ( ExceptT, MonadError (throwError) )
-import Data.Functor.Identity ( Identity (..) )
 
-import Data.Foldable (for_)
+import qualified Data.Map as Mp
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
@@ -77,9 +76,9 @@ mergeOptions cli file env = do
       Nothing -> pure $ Right ()
       Just notionDef -> do
         let
-          notionOpts = case notionDef.apiKey of
-            Nothing -> Rt.NotionOptions { Rt.apiKey = "" }
-            Just key -> Rt.NotionOptions { Rt.apiKey = T.pack key }
+          notionOpts = case notionDef.apiKeys of
+            [] -> Rt.NotionOptions { Rt.apiKeys = Mp.empty }
+            _ -> Rt.NotionOptions { Rt.apiKeys = Mp.fromList [ (p.label, p.ident) | p <- notionDef.apiKeys ] }
         modify $ \s -> s { Rt.notion = Just notionOpts }
         pure $ Right ()
 

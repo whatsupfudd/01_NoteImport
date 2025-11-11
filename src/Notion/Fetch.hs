@@ -1,24 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE NamedFieldPuns #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE RankNTypes #-}
 
 -- | Minimal Notion client for:
---   1) Fetching ALL pages visible to an integration (workspace-scoped via /v1/search with filter=page)
---   2) Fetching page content as a tree of Blocks (recursively follows children)
---
--- Usage (sketch):
---   import qualified Notion as N
---   main = do
---     n <- N.mkNotion "secret_..."  -- your integration secret
---     pages <- N.fetchAllPages n
---     putStrLn ("Found pages: " ++ show (length pages))
---     -- Pull one page's full block tree
---     case pages of
---       (p:_) -> do
---         blocks <- N.fetchPageBlocksDeep n p.id
---         print (length blocks)
---       _ -> pure ()
+--   1) fetchAllPages: fetching ALL pages visible to an integration (workspace-scoped via /v1/search with filter=page)
+--   2) fetchPageBlocksTop: fetching page content as a tree of Blocks (recursively follows children)
+--   3) fetchPageBlocksDeep: fetching a page's full block tree (top-level + recursive children)
+--   4) upgradeToHBlocks: upgrading a list of blocks to a list of block contents
 --
 -- Notes:
 --   • This module focuses on IDs/URLs for pages and generic block trees. You can enrich the
@@ -26,22 +15,14 @@
 --   • Headers: Authorization bearer + Notion-Version are set automatically.
 --   • Pagination is fully handled for search and blocks children endpoints.
 
-module Notion.Fetch
-  ( Notion(..)
-  , mkNotion
-  , Page(..)
-  , Block(..)
-  , fetchAllPages
-  , fetchPageBlocksTop
-  , fetchPageBlocksDeep
-  , fetchBlocksDeep
-  ) where
+module Notion.Fetch where
 
 import Control.Monad (when)
 
 import qualified Data.ByteString.Char8 as B8
-import qualified Data.ByteString.Lazy as BL
-import Data.Maybe (fromMaybe)
+import qualified Data.ByteString.Lazy as Bls
+import qualified Data.ByteString as Bs
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -54,111 +35,220 @@ import GHC.Generics (Generic)
 
 import qualified Data.Aeson as Ae
 import qualified Data.Aeson.Key as Aek
+import qualified Data.Aeson.KeyMap as Akm
 import Data.Aeson.Types (Parser)
-import Network.HTTP.Client
+
+import qualified Network.HTTP.Client as Ht
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 
 
--- Orphan instances for UUID <-> JSON (Text)
-{-
-instance FromJSON UUID where
-  parseJSON = withText "UUID" $ \t -> maybe (fail "invalid UUID") pure (UUID.fromText t)
-instance Ae.ToJSON UUID where
-  Ae.ToJSON = String . UUID.toText
--}
-
--- Environment ---------------------------------------------------------------
-
-data Notion = Notion
-  { token :: Text
+data Notion = Notion { 
+    token :: Text
   , version :: Text
-  , manager :: Manager
+  , manager :: Ht.Manager
   }
+
 
 mkNotion :: Text -> IO Notion
 mkNotion token =
   let
     version = "2022-06-28"
   in do
-  manager <- newManager tlsManagerSettings
+  manager <- Ht.newManager tlsManagerSettings
   pure $ Notion token version manager
 
-setNotionHeaders :: Notion -> Request -> Request
-setNotionHeaders n req = req
-  { requestHeaders =
-      [ ("Authorization", B8.pack ("Bearer " ++ T.unpack n.token))
-      , ("Notion-Version", B8.pack (T.unpack n.version))
+
+setHeaders :: Notion -> Ht.Request -> Ht.Request
+setHeaders notion request = request { 
+    Ht.requestHeaders = [ 
+        ("Authorization", B8.pack ("Bearer " ++ T.unpack notion.token))
+      , ("Notion-Version", B8.pack (T.unpack notion.version))
       , ("Content-Type", "application/json")
       ]
   }
 
--- Pages (Search API) --------------------------------------------------------
 
-data Filter = Filter { property :: Text, value :: Text } deriving (Show, Generic, Ae.ToJSON)
+data Filter = Filter {
+    property :: Text
+  , value :: Text
+ }
+ deriving (Show, Generic, Ae.ToJSON)
 
-data SearchBody = SearchBody
-  { filter :: Filter
+
+data SearchBody = SearchBody {
+    filter :: Filter
   , page_size :: Int
   , start_cursor :: Maybe Text
-  } deriving (Show, Generic)
+  }
+  deriving (Show, Generic)
+
 instance Ae.ToJSON SearchBody where
   toJSON sb =
     Ae.object $ [
-         ("filter", Ae.toJSON sb.filter)
+        ("filter", Ae.toJSON sb.filter)
       , ("page_size", Ae.toJSON sb.page_size)
       ]
       <> case sb.start_cursor of
         Nothing -> []
         Just c -> [("start_cursor", Ae.toJSON c)]
 
-data Page = Page { 
+
+data PageB = PageB { 
   id :: UUID
   , url :: Text
-  } deriving (Show, Generic, Ae.FromJSON, Ae.ToJSON)
+  }
+  deriving (Show, Generic, Ae.FromJSON, Ae.ToJSON)
+
+
+data UserRef = UserRef
+  { object :: Text
+  , id :: UUID
+  } deriving (Show, Generic)
+instance Ae.FromJSON UserRef
+
+-- Parent union
+data Parent
+  = WorkspaceParent { workspace :: Bool }
+  | DatabaseParent  { database_id :: UUID }
+  | PageParent      { page_id :: UUID }
+  deriving (Show, Generic)
+
+instance Ae.FromJSON Parent where
+  parseJSON = Ae.withObject "Parent" $ \o -> do
+    t <- o Ae..: "type" :: Parser Text
+    case t of
+      "workspace"   -> WorkspaceParent <$> o Ae..: "workspace"
+      "database_id" -> DatabaseParent  <$> o Ae..: "database_id"
+      "page_id"     -> PageParent      <$> o Ae..: "page_id"
+      _             -> fail ("unsupported parent.type: " <> show t)
+
+-- File link (used by cover and file/external icons)
+data FileLink
+  = ExternalLink { url :: Text }
+  | HostedLink   { url :: Text, expiry_time :: UTCTime }
+  deriving (Show, Generic)
+
+instance Ae.FromJSON FileLink where
+  parseJSON = Ae.withObject "FileLink" $ \o -> do
+    t <- o Ae..: "type" :: Parser Text
+    case t of
+      "external" -> do e <- o Ae..: "external"; ExternalLink <$> (e Ae..: "url")
+      "file"     -> do f <- o Ae..: "file"; HostedLink <$> (f Ae..: "url") <*> (f Ae..: "expiry_time")
+      _          -> fail ("unsupported filelink.type: " <> show t)
+
+-- Icon union (emoji or a file link)
+data Icon
+  = IconEmoji { emoji :: Text }
+  | IconLink  { file :: FileLink }
+  deriving (Show, Generic)
+
+instance Ae.FromJSON Icon where
+  parseJSON = Ae.withObject "Icon" $ \o -> do
+    t <- o Ae..: "type" :: Parser Text
+    case t of
+      "emoji"    -> IconEmoji <$> o Ae..: "emoji"
+      "external" -> IconLink  <$> (Ae.parseJSON (Ae.Object o) :: Parser FileLink)
+      "file"     -> IconLink  <$> (Ae.parseJSON (Ae.Object o) :: Parser FileLink)
+      _          -> fail ("unsupported icon.type: " <> show t)
+
+-- Full page payload (search result)
+data PageMeta = PageMeta { 
+    object :: Text
+  , id :: UUID
+  , created_time :: UTCTime
+  , last_edited_time :: UTCTime
+  , created_by :: UserRef
+  , last_edited_by :: UserRef
+  , cover :: Maybe FileLink
+  , icon :: Maybe Icon
+  , parent :: Parent
+  , archived :: Bool
+  , in_trash :: Bool
+  , properties :: Ae.Value          -- keep raw for flexibility
+  , title_rich :: [RichText]        -- extracted convenience
+  , title_plain :: Maybe Text       -- extracted convenience
+  , url :: Text
+  , public_url :: Maybe Text
+  } deriving (Show, Generic)
+
+instance Ae.FromJSON PageMeta where
+  parseJSON = Ae.withObject "Page" $ \o -> do
+    object <- o Ae..: "object"
+    id <- o Ae..: "id"
+    created_time <- o Ae..: "created_time"
+    last_edited_time <- o Ae..: "last_edited_time"
+    created_by <- o Ae..: "created_by"
+    last_edited_by <- o Ae..: "last_edited_by"
+    cover <- o Ae..:? "cover"
+    icon <- o Ae..:? "icon"
+    parent <- o Ae..: "parent"
+    archived <- o Ae..: "archived"
+    in_trash <- o Ae..: "in_trash"
+    properties <- o Ae..: "properties"
+
+    -- Extract title property if present
+    title_rich <-
+      case properties of
+        Ae.Object hm ->
+          case Akm.lookup "title" hm of
+            Just v  -> Ae.withObject "TitleProperty" (\tp -> tp Ae..:? "title" Ae..!= []) v
+            Nothing -> pure []
+        _ -> pure []
+    let title_plain =
+          case title_rich of
+            [] -> Nothing
+            xs -> Just (mconcat (map (.plain_text) xs))
+
+    url <- o Ae..: "url"
+    public_url <- o Ae..:? "public_url"
+    pure (PageMeta object id created_time last_edited_time created_by last_edited_by cover icon parent archived in_trash properties title_rich title_plain url public_url)
 
 
 -- Generic Notion list envelope
 -- Used by both /v1/search and /v1/blocks/{id}/children
 
-data ListEnvelope a = ListEnvelope
-  { object :: Text
+data ListEnvelope a = ListEnvelope { 
+    object :: Text
   , results :: [a]
   , next_cursor :: Maybe Text
   , has_more :: Bool
-  } deriving (Show, Generic)
+  }
+  deriving (Show, Generic)
 instance Ae.FromJSON a => Ae.FromJSON (ListEnvelope a) where
   parseJSON = Ae.withObject "ListEnvelope" $ \o -> do
     object <- o Ae..: "object"
     results <- o Ae..: "results"
     next_cursor <- o Ae..:? "next_cursor"
     has_more <- o Ae..: "has_more"
-    pure ListEnvelope{object,results,next_cursor,has_more}
+    pure $ ListEnvelope object results next_cursor has_more
 
 
-searchPagesPage :: Notion -> Maybe Text -> IO (ListEnvelope Page)
-searchPagesPage n mCursor = do
-  initReq <- parseRequest "https://api.notion.com/v1/search"
-  let body = SearchBody
-        { filter = Filter { property = "object", value = "page" }
+searchPagesPage :: Notion -> Maybe Text -> IO (ListEnvelope PageMeta)
+searchPagesPage notion mCursor = do
+  initReq <- Ht.parseRequest "https://api.notion.com/v1/search"
+  let body = SearchBody { 
+          filter = Filter { property = "object", value = "page" }
         , page_size = 100
         , start_cursor = mCursor
         }
-      req = setNotionHeaders n initReq
-              { method = "POST"
-              , requestBody = RequestBodyLBS (Ae.encode body)
+      req = setHeaders notion initReq { 
+                Ht.method = "POST"
+              , Ht.requestBody = Ht.RequestBodyLBS (Ae.encode body)
               }
-  putStrLn $ "@[searchPagesPage] req: " <> show req <> " body: " <> (T.unpack . T.decodeUtf8 . BL.toStrict) (Ae.encode body)
-  withResponse req n.manager $ \res -> do
-    bytes <- brConsume (responseBody res)
-    let lbs = BL.fromChunks bytes
+  -- putStrLn $ "@[searchPagesPage] req: " <> show req <> " body: " <> (T.unpack . T.decodeUtf8 . Bls.toStrict) (Ae.encode body)
+  Ht.withResponse req notion.manager $ \res -> do
+    bytes <- Ht.brConsume (Ht.responseBody res)
+    let lbs = Bls.fromChunks bytes
+    let fileName = "/tmp/search-pages-page-" <> maybe "0" T.unpack mCursor <> ".json"
+    Bls.writeFile fileName lbs
     case Ae.eitherDecode' lbs of
       Left e -> do
-        putStrLn $ "@[searchPagesPage] lbs: " <> (T.unpack . T.decodeUtf8 . BL.toStrict) lbs
+        putStrLn $ "@[searchPagesPage] lbs: " <> (T.unpack . T.decodeUtf8 . Bls.toStrict) lbs
         fail ("search decode error: " ++ e)
       Right env -> pure env
 
 
-fetchAllPages :: Notion -> IO [Page]
+fetchAllPages :: Notion -> IO [PageMeta]
 fetchAllPages n = go Nothing []
   where
     go mCur acc = do
@@ -169,10 +259,6 @@ fetchAllPages n = go Nothing []
         else pure acc'
 
 -- Blocks --------------------------------------------------------------------
-
--- A generic Block that preserves the type-specific payload under `content`.
--- Example: for type_ == "paragraph", `content` holds the value of the
--- "paragraph" object as JSON.
 
 data Block = Block { 
   id :: UUID
@@ -194,32 +280,51 @@ instance Ae.FromJSON Block where
     pure $ Block id ktype archived has_children content []
 
 
-blocksChildrenPage :: Notion -> UUID -> Maybe Text -> IO (ListEnvelope Block)
-blocksChildrenPage n bid mCursor = do
-  let
-    base = "https://api.notion.com/v1/blocks/"
-    q = case mCursor of
-          Nothing -> "?page_size=100"
-          Just c  -> "?page_size=100&start_cursor=" <> T.unpack c
-    url = base ++ T.unpack (UUID.toText bid) ++ "/children" ++ q
-  initReq <- parseRequest url
-  let req = setNotionHeaders n initReq { method = "GET" }
-  withResponse req n.manager $ \res -> do
-    bytes <- brConsume (responseBody res)
-    let lbs = BL.fromChunks bytes
-    case Ae.eitherDecode' lbs of
-      Left e -> fail ("blocks decode error: " ++ e)
-      Right env -> pure env
+fetchPageBlocks :: Notion -> PageMeta -> IO [Block]
+fetchPageBlocks n page = fetchPageBlocksTop n page.id
+
+fetchAllPageBlocks :: Notion -> PageMeta -> IO [Block]
+fetchAllPageBlocks n page = fetchPageBlocksDeep n page.id
 
 
 -- Fetch ONLY top-level blocks (paginated)
 fetchPageBlocksTop :: Notion -> UUID -> IO [Block]
-fetchPageBlocksTop n anID = go Nothing []
+fetchPageBlocksTop n anID =
+  let
+    pageName = "/tmp/blocks-" <> T.unpack (UUID.toText anID) <> ".out"
+  in do
+  blocks <- fetchPageIterator Nothing []
+  Bs.writeFile pageName (Bs.intercalate "\n ," (map (T.encodeUtf8 . T.pack . show) blocks))
+  pure blocks
   where
-    go mCur acc = do
-      env <- blocksChildrenPage n anID mCur
-      let acc' = acc ++ env.results
-      if env.has_more then go env.next_cursor acc' else pure acc'
+  fetchPageIterator mbCursor acc = do
+    listEnv <- blocksChildrenPage n anID mbCursor
+    let
+      acc' = acc <> listEnv.results
+    if listEnv.has_more then fetchPageIterator listEnv.next_cursor acc' else pure acc'
+
+
+blocksChildrenPage :: Notion -> UUID -> Maybe Text -> IO (ListEnvelope Block)
+blocksChildrenPage n bid mCursor = do
+  let
+    base = "https://api.notion.com/v1/blocks/"
+    qParams = case mCursor of
+          Nothing -> "?page_size=100"
+          Just anID  -> "?page_size=100&start_cursor=" <> T.unpack anID
+    url = base ++ T.unpack (UUID.toText bid) ++ "/children" ++ qParams
+  initReq <- Ht.parseRequest url
+  let request = setHeaders n initReq { Ht.method = "GET" }
+  Ht.withResponse request n.manager $ \response -> do
+    bStrings <- Ht.brConsume (Ht.responseBody response)
+    let lbString = Bls.fromChunks bStrings
+    case Ae.eitherDecode' lbString of
+      Left err -> fail ("blocks decode error: " <> err)
+      Right listEnv ->
+        let
+          fileName = "/tmp/blocks-" <> T.unpack (UUID.toText bid) <> "_" <> maybe "0" T.unpack mCursor <> ".json"
+        in do
+        Bls.writeFile fileName lbString
+        pure listEnv
 
 
 -- Fetch a page's full block tree (top-level + recursive children)
@@ -242,7 +347,6 @@ fetchBlocksDeep n = mapM fill
         else pure b
 
 
-
 -- Block content types:
 data BlockContent =
   ParagraphBC Paragraph
@@ -251,65 +355,90 @@ data BlockContent =
   | BulletedListItemBC BulletedListItem
   | NumberedListItemBC NumberedListItem
   | DividerBC Divider
-  | Heading1BC Heading1
-  | Heading2BC Heading2
-  | Heading3BC Heading3
+  | HeadingBC Int Heading
   | CodeBC Code
   | TableBC Table
+  | QuoteBC Quote
+  | ChildPageBC ChildPage
   deriving (Show, Generic)
 
-instance Ae.FromJSON BlockContent where
 
-data Paragraph = Paragraph
-  { color :: Text
+-- Upgrade a list of blocks to a list of block contents
+-- This is a helper function to convert the raw block data into a more structured format
+-- that can be used to generate HTML or other output formats.
+-- The input is a list of blocks, and the output is a list of block contents
+upgradeToHBlocks :: [Block] -> [Either String BlockContent]
+upgradeToHBlocks = map blockUpgrade
+  where
+  blockUpgrade :: Block -> Either String BlockContent
+  blockUpgrade b = case b.ktype of
+    "paragraph" -> blockToEither b.content ParagraphBC
+    -- "rich_text" -> RichTextBC <$> asRichText b -- TODO: implement asRichText
+    "image" -> blockToEither b.content ImageBC
+    "bulleted_list_item" -> blockToEither b.content BulletedListItemBC
+    "numbered_list_item" -> blockToEither b.content NumberedListItemBC
+    "divider" -> blockToEither b.content DividerBC
+    "heading_1" -> blockToEither b.content (HeadingBC 1)
+    "heading_2" -> blockToEither b.content (HeadingBC 2)
+    "heading_3" -> blockToEither b.content (HeadingBC 3)
+    "code" -> blockToEither b.content CodeBC
+    "table" -> blockToEither b.content TableBC
+    "quote" -> blockToEither b.content QuoteBC
+    "child_page" -> blockToEither b.content ChildPageBC
+    _ -> Left $ "@[upgradeToHBlocks] unsupported block type: " <> show b.ktype <> " in " <> show b
+
+
+blockToEither :: forall aBlockKind. Ae.FromJSON aBlockKind => Ae.Value -> (aBlockKind -> BlockContent) -> Either String BlockContent
+blockToEither aContent upgradeFct = case Ae.fromJSON aContent of
+  Ae.Success a -> Right $ upgradeFct a
+  Ae.Error err -> Left $ "bad block content: " <> err <> " in " <> show aContent
+
+
+data Paragraph = Paragraph { 
+    color :: Text
   , rich_text :: [RichText]
-  } deriving (Show, Generic)
-instance Ae.FromJSON Paragraph
+  }
+  deriving (Show, Generic, Ae.FromJSON)
 
 -- RichText (handles the common "text" variant; other variants will simply
 -- leave `text = Nothing` but still parse annotations/plain_text/href/type_)
 
-data RichText = RichText
-  { type_ :: Text
+data RichText = RichText { 
+    type_ :: Text
   , text :: Maybe TextSpan
   , annotations :: Annotations
   , plain_text :: Text
   , href :: Maybe Text
-  } deriving (Show, Generic)
+  } 
+  deriving (Show, Generic)
+
 instance Ae.FromJSON RichText where
   parseJSON = Ae.genericParseJSON Ae.defaultOptions{ Ae.fieldLabelModifier = flm }
-    where flm "type_" = "type"; flm x = x
+    where
+    flm "type_" = "type"; flm x = x
 
 -- Text payload for the "text" rich_text variant
 
-data TextSpan = TextSpan
-  { content :: Text
+data TextSpan = TextSpan { 
+    content :: Text
   , link :: Maybe Url
-  } deriving (Show, Generic, Ae.FromJSON)
+  }
+  deriving (Show, Generic, Ae.FromJSON)
 
 newtype Url = Url { url :: Text } deriving (Show, Generic, Ae.FromJSON)
 
 -- Style annotations on rich_text
 
-data Annotations = Annotations
-  { bold :: Bool
+data Annotations = Annotations {
+    bold :: Bool
   , code :: Bool
   , color :: Text
   , italic :: Bool
   , strikethrough :: Bool
   , underline :: Bool
-  } deriving (Show, Generic, Ae.FromJSON)
+  }
+  deriving (Show, Generic, Ae.FromJSON)
 
--- Helper to extract a Paragraph from a Block's `content` when type_ == "paragraph"
--- Returns Nothing if the block is not a paragraph or content is malformed.
-
-asParagraph :: Block -> Maybe Paragraph
-asParagraph b =
-  if b.ktype == "paragraph"
-    then case Ae.fromJSON b.content of
-           Ae.Success p -> Just p
-           _ -> Nothing
-    else Nothing
 
 -- Image content (for Block.ktype == "image")
 data Image = Image {
@@ -339,15 +468,6 @@ instance Ae.FromJSON Image where
         pure $ Image caption (File url expiry_time)
       _ -> fail ("unsupported image.type: " <> show t)
 
--- Helper to decode an Image from your existing Block
-asImage :: Block -> Maybe Image
-asImage b =
-  if b.ktype == "image" then
-    case Ae.fromJSON b.content of
-      Ae.Success x -> Just x
-      _ -> Nothing
-  else
-    Nothing
 
 -- Bulleted list item content (for Block.ktype == "bulleted_list_item")
 data BulletedListItem = BulletedListItem { 
@@ -362,47 +482,31 @@ instance Ae.FromJSON BulletedListItem where
     rich_text <- o Ae..:? "rich_text" Ae..!= []
     pure $ BulletedListItem color rich_text
 
--- Helper to decode a BulletedListItem from your Block.content
-asBulletedListItem :: Block -> Maybe BulletedListItem
-asBulletedListItem b =
-  if b.ktype == "bulleted_list_item" then
-    case Ae.fromJSON b.content of
-      Ae.Success x -> Just x
-      _ -> Nothing
-  else
-    Nothing
 
 -- Heading_1 content (for Block.ktype == "heading_1")
 -- JSON shape: {"color":"default","is_toggleable":Bool,"rich_text":[...]}
-data Heading1 = Heading1 {
-     color :: Text
+data Heading = Heading {
+    color :: Text
   , is_toggleable :: Bool
   , rich_text :: [RichText]
   }
   deriving (Show, Generic)
 
-instance Ae.FromJSON Heading1 where
-  parseJSON = Ae.withObject "Heading1" $ \o -> do
+instance Ae.FromJSON Heading where
+  parseJSON = Ae.withObject "Heading" $ \o -> do
     color <- o Ae..:  "color"
     is_toggleable <- o Ae..:? "is_toggleable" Ae..!= False
     rich_text <- o Ae..:? "rich_text"     Ae..!= []
-    pure $ Heading1 color is_toggleable rich_text
+    pure $ Heading color is_toggleable rich_text
 
--- Helper to decode a Heading1 from your existing Block.content
-asHeading1 :: Block -> Maybe Heading1
-asHeading1 b =
-  if b.ktype == "heading_1" then
-    case Ae.fromJSON b.content of
-      Ae.Success x -> Just x
-      _ -> Nothing
-  else
-    Nothing
+
 
 -- Numbered list item content (for Block.ktype == "numbered_list_item")
-data NumberedListItem = NumberedListItem
-  { color :: Text
+data NumberedListItem = NumberedListItem { 
+    color :: Text
   , rich_text :: [RichText]
-  } deriving (Show, Generic)
+  }
+  deriving (Show, Generic)
 
 instance Ae.FromJSON NumberedListItem where
   parseJSON = Ae.withObject "NumberedListItem" $ \o -> do
@@ -410,15 +514,6 @@ instance Ae.FromJSON NumberedListItem where
     rich_text <- o Ae..:? "rich_text" Ae..!= []
     pure $ NumberedListItem color rich_text
 
--- Helper to decode a NumberedListItem from your Block.content
-asNumberedListItem :: Block -> Maybe NumberedListItem
-asNumberedListItem b =
-  if b.ktype == "numbered_list_item" then
-    case Ae.fromJSON b.content of
-        Ae.Success x -> Just x
-        _ -> Nothing
-  else
-    Nothing
 
 -- Divider (for Block.ktype == "divider")
 data Divider = Divider deriving (Show)
@@ -426,63 +521,15 @@ data Divider = Divider deriving (Show)
 instance Ae.FromJSON Divider where
   parseJSON = Ae.withObject "Divider" $ \_ -> pure Divider
 
-asDivider :: Block -> Maybe Divider
-asDivider b =
-  if b.ktype == "divider"
-    then case Ae.fromJSON b.content of Ae.Success x -> Just x; _ -> Nothing
-    else Nothing
-
-
--- Heading_2 (for Block.ktype == "heading_2")
--- JSON: {"color":"...","is_toggleable":Bool,"rich_text":[RichText]}
-data Heading2 = Heading2
-  { color :: Text
-  , is_toggleable :: Bool
-  , rich_text :: [RichText]
-  } deriving (Show, Generic)
-
-instance Ae.FromJSON Heading2 where
-  parseJSON = Ae.withObject "Heading2" $ \o -> do
-    color <- o Ae..:  "color"
-    is_toggleable <- o Ae..:? "is_toggleable" Ae..!= False
-    rich_text <- o Ae..:? "rich_text" Ae..!= []
-    pure (Heading2 color is_toggleable rich_text)
-
-asHeading2 :: Block -> Maybe Heading2
-asHeading2 b =
-  if b.ktype == "heading_2"
-    then case Ae.fromJSON b.content of Ae.Success x -> Just x; _ -> Nothing
-    else Nothing
-
-
--- Heading_3 (for Block.ktype == "heading_3")
--- JSON: {"color":"...","is_toggleable":Bool,"rich_text":[RichText]}
-data Heading3 = Heading3
-  { color :: Text
-  , is_toggleable :: Bool
-  , rich_text :: [RichText]
-  } deriving (Show, Generic)
-
-instance Ae.FromJSON Heading3 where
-  parseJSON = Ae.withObject "Heading3" $ \o -> do
-    color <- o Ae..:  "color"
-    is_toggleable <- o Ae..:? "is_toggleable" Ae..!= False
-    rich_text <- o Ae..:? "rich_text" Ae..!= []
-    pure (Heading3 color is_toggleable rich_text)
-
-asHeading3 :: Block -> Maybe Heading3
-asHeading3 b =
-  if b.ktype == "heading_3"
-    then case Ae.fromJSON b.content of Ae.Success x -> Just x; _ -> Nothing
-    else Nothing
 
 -- Code (for Block.ktype == "code")
 -- JSON: {"caption":[RichText], "language":"elm", "rich_text":[RichText]}
-data Code = Code
-  { caption :: [RichText]
+data Code = Code {
+    caption :: [RichText]
   , language :: Text
   , rich_text :: [RichText]
-  } deriving (Show, Generic)
+  }
+  deriving (Show, Generic)
 
 instance Ae.FromJSON Code where
   parseJSON = Ae.withObject "Code" $ \o -> do
@@ -491,20 +538,16 @@ instance Ae.FromJSON Code where
     rich_text <- o Ae..:? "rich_text" Ae..!= []
     pure (Code caption language rich_text)
 
-asCode :: Block -> Maybe Code
-asCode b =
-  if b.ktype == "code"
-    then case Ae.fromJSON b.content of Ae.Success x -> Just x; _ -> Nothing
-    else Nothing
 
 -- Table (for Block.ktype == "table")
 -- JSON: {"has_column_header":Bool, "has_row_header":Bool, "table_width":Number}
 -- Note: rows are separate child blocks (type "table_row"), not embedded here.
-data Table = Table
-  { has_column_header :: Bool
+data Table = Table { 
+    has_column_header :: Bool
   , has_row_header :: Bool
   , table_width :: Int
-  } deriving (Show, Generic)
+  }
+  deriving (Show, Generic)
 
 instance Ae.FromJSON Table where
   parseJSON = Ae.withObject "Table" $ \o -> do
@@ -515,8 +558,25 @@ instance Ae.FromJSON Table where
     let table_width = floor n
     pure (Table has_column_header has_row_header table_width)
 
-asTable :: Block -> Maybe Table
-asTable b =
-  if b.ktype == "table"
-    then case Ae.fromJSON b.content of Ae.Success x -> Just x; _ -> Nothing
-    else Nothing
+
+-- Quote (for Block.ktype == "quote")
+-- JSON: {"color":"...","rich_text":[RichText]}
+data Quote = Quote { 
+    color :: Text
+  , rich_text :: [RichText]
+  }
+  deriving (Show, Generic)
+
+instance Ae.FromJSON Quote where
+  parseJSON = Ae.withObject "Quote" $ \o -> do
+    color <- o Ae..:  "color"
+    rich_text <- o Ae..:? "rich_text" Ae..!= []
+    pure (Quote color rich_text)
+
+
+-- Child page (for Block.ktype == "child_page")
+-- JSON: {"title":"..."}
+newtype ChildPage = ChildPage { 
+    title :: Text
+  }
+  deriving (Show, Generic, Ae.FromJSON)

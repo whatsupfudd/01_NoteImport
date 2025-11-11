@@ -22,10 +22,20 @@ data GlobalOptions = GlobalOptions {
   , debugGO :: String
   }
 
+
+data DocXOpts = DocXOpts {
+  inPath :: FilePath
+  , outPath :: Maybe FilePath
+  , asYaml :: Bool
+  , promote :: Bool
+  } deriving stock (Show)
+
+
 data Command =
   HelpCmd
   | VersionCmd
   | NotionCmd Text
+  | DocXCmd DocXOpts
   deriving stock (Show)
 
 {- HERE: Additional structures for holding new command parameters:
@@ -96,11 +106,12 @@ commandDefs =
       ("help", pure HelpCmd, "Help about any command.")
       , ("version", pure VersionCmd, "Shows the version number of importer.")
       , ("notion", notionOpts, "Notion command.")
+      , ("docx", DocXCmd <$> docxOpts, "DocX command.")
       ]
     headArray = head cmdArray
     tailArray = tail cmdArray
   in
-    foldl (\accum aCmd -> (cmdBuilder aCmd) <> accum) (cmdBuilder headArray) tailArray
+    foldl (\accum aCmd -> cmdBuilder aCmd <> accum) (cmdBuilder headArray) tailArray
   where
     cmdBuilder (label, cmdDef, desc) =
       command label (info cmdDef (progDesc desc))
@@ -108,3 +119,11 @@ commandDefs =
 notionOpts :: Parser Command
 notionOpts =
   NotionCmd <$> strArgument (metavar "WORDSPACE" <> help "Notion workspace to use.")
+
+docxOpts :: Parser DocXOpts
+docxOpts =
+  DocXOpts <$>
+      strOption (long "in" <> short 'i' <> help "Input file path" <> metavar "FILE")
+    <*> optional (strOption (long "out" <> short 'o' <> help "Output file path" <> metavar "FILE"))
+    <*> switch (long "yaml" <> help "Output as YAML" <> showDefault)
+    <*> switch (long "promote" <> help "Promote numbered paragraphs to headers" <> showDefault)

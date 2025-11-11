@@ -1,21 +1,23 @@
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 module Options.ConfFile where
 
 import qualified Control.Exception as Cexc
-import qualified Data.Aeson as Aes
-import Data.Text (Text)
+import Data.Text (Text, pack)
+
 import GHC.Generics
+
 import qualified System.Directory as Sdir
 import qualified System.Environment as Senv
 import qualified System.FilePath.Posix as Spsx
 import qualified System.IO.Error as Serr
 
+import qualified Data.Aeson as Aes
+import qualified Data.Aeson.KeyMap as Akm
+import qualified Data.Aeson.Key as Ak
+
 import qualified Data.Yaml as Yaml
-
-
 
 
 data FileOptions = FileOptions {
@@ -37,9 +39,27 @@ data PgDbOpts = PgDbOpts {
   deriving stock (Show, Generic)
 
 newtype NotionDef = NotionDef {
-  apiKey :: Maybe String
-}
+  apiKeys :: [ PairReference ]
+  }
   deriving stock (Show, Generic)
+
+data PairReference = PairReference {
+  label :: Text
+  , ident :: Text
+  }
+ deriving (Generic, Show)
+
+instance Aes.FromJSON PairReference where
+  parseJSON (Aes.Object o) =
+    let
+      (label, value) = head $ Akm.toList o
+      ident = case value of
+        Aes.String s -> s
+        Aes.Null -> ""
+        _ -> "[PairReference.parseJSON] Invalid fct value: " <> (pack . show) value
+    in
+      pure (PairReference (pack . Ak.toString $ label) ident)
+
 
 
 defaultConfName :: FilePath

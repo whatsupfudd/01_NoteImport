@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Commands
+      Commands.DocX
       Commands.Help
       Commands.Notion
       Commands.Version
@@ -49,19 +50,27 @@ library
   ghc-options: -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
+    , base16-bytestring
     , bytestring
     , containers
+    , cryptonite
     , directory
     , filepath
     , gitrev
+    , hashable
     , hasql
     , hasql-pool
     , hasql-th
     , http-client
     , http-client-tls
+    , megaparsec
+    , memory
     , mtl
     , optparse-applicative
+    , pandoc >=3.1
+    , pandoc-types
     , postgresql-binary
     , scientific
     , text
@@ -85,20 +94,28 @@ executable noteimp
   ghc-options: -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
+    , base16-bytestring
     , bytestring
     , containers
+    , cryptonite
     , directory
     , filepath
     , gitrev
+    , hashable
     , hasql
     , hasql-pool
     , hasql-th
     , http-client
     , http-client-tls
+    , megaparsec
+    , memory
     , mtl
     , noteimp
     , optparse-applicative
+    , pandoc >=3.1
+    , pandoc-types
     , postgresql-binary
     , scientific
     , text
@@ -123,20 +140,28 @@ test-suite noteimp-test
   ghc-options: -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
+    , base16-bytestring
     , bytestring
     , containers
+    , cryptonite
     , directory
     , filepath
     , gitrev
+    , hashable
     , hasql
     , hasql-pool
     , hasql-th
     , http-client
     , http-client-tls
+    , megaparsec
+    , memory
     , mtl
     , noteimp
     , optparse-applicative
+    , pandoc >=3.1
+    , pandoc-types
     , postgresql-binary
     , scientific
     , text

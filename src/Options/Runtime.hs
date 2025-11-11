@@ -3,13 +3,15 @@ module Options.Runtime (
   ) where
 -- import Data.Int (Int)
 
+import qualified Data.Map as Mp
 import Data.Text (Text)
 
 import DB.Connect (PgDbConfig (..), defaultPgDbConf)
+import Options.ConfFile (PairReference)
 
 
 newtype NotionOptions = NotionOptions {
-  apiKey :: Text
+  apiKeys :: Mp.Map Text Text
   }
   deriving (Show)
 

@@ -51,6 +51,16 @@ dependencies:
   - hasql-pool
   # For scientific:
   - scientific
+  # For pandoc:
+  - pandoc >= 3.1
+  - pandoc-types
+  - megaparsec
+  - hashable
+  - cryptonite
+  - memory
+  - base16-bytestring
+  - aeson
+  - aeson-pretty
 
 default-extensions:
 - OverloadedStrings
