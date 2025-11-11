@@ -58,6 +58,10 @@ import qualified Data.Aeson as Ae
 import qualified Data.Aeson.Encode.Pretty as AeP
 import Data.Aeson ((.=))
 
+import Data.Yaml (encodeFile)
+import qualified Data.Yaml as Y
+import qualified Data.Yaml.Pretty as YP
+
 import Crypto.Hash (hashWith, SHA256(..))
 
 import qualified Text.Megaparsec as MP
@@ -92,9 +96,13 @@ emitJson mb d = case mb of
     cfg = AeP.defConfig { AeP.confCompare = AeP.compare }
 
 emitYaml :: Maybe FilePath -> Doc -> IO ()
-emitYaml mb d = do
-  -- keep JSON by default; plug in Data.Yaml if the team wants native YAML
-  emitJson mb d
+emitYaml mb doc = do
+  let val = Ae.toJSON doc
+      cfg = YP.setConfDropNull True YP.defConfig
+      bs  = YP.encodePretty cfg val   -- strict ByteString
+  case mb of
+    Nothing -> BS.putStr bs
+    Just fp -> BS.writeFile fp bs
 
 
 --------------------------------------------------------------------------------
@@ -159,15 +167,64 @@ mkFigure bid caption = Block { idB = bid, kindB = BkFigure, levelB = Nothing, te
 --------------------------------------------------------------------------------
 -- Pandoc → Blocks transformation
 --------------------------------------------------------------------------------
-
+-- Build-time stack invariant:
+--   • stack !! 0 is the CURRENT TOP (deepest) section
+--   • last stack item is the ROOT
+--   • path is the current section ordinal path (top's path)
 data Build = Build
-  { stack :: [Block]     -- root .. current section (last is top)
-  , path  :: [Int]       -- section ordinal path (1-based per level)
+  { stack :: [Block]
+  , path  :: [Int]
   , src   :: FilePath
   }
 
+
 emptyBuild :: FilePath -> Build
 emptyBuild fp = Build { stack = [rootBlock (stableId fp "root" "")], path = [], src = fp }
+
+
+-- Treat stack as [currentTop, parent, ..., root]; root is last.
+levelOf :: Block -> Int
+levelOf blk = maybe 0 id blk.levelB
+
+push :: Block -> Build -> Build
+push blk b = b { stack = blk : b.stack }
+
+-- Attach current top as a child of its parent, then pop it.
+bubbleOnce :: Build -> Build
+bubbleOnce b = case b.stack of
+  (child:parent:rest) ->
+    let parent' = parent { childrenB = parent.childrenB <> [child] }
+    in b { stack = parent' : rest }
+  _ -> b
+
+-- Close all open levels down to target (keep top.levelB < target)
+closeToLevel :: Int -> Build -> Build
+closeToLevel target b = case b.stack of
+  (t:_:_) | levelOf t >= target -> closeToLevel target (bubbleOnce b)
+  _                             -> b
+
+-- At end of document, bubble everything into the root
+bubbleAll :: Build -> Build
+bubbleAll b = case b.stack of
+  (_:_:_) -> bubbleAll (bubbleOnce b)
+  _       -> b
+
+-- Run a sub-fold in an isolated container; returns the children it produced,
+-- leaving the original parent stack untouched.
+pushIsolated :: Build -> (Build -> Build) -> ([Block], Build)
+pushIsolated b k =
+  let tmp = Block { idB       = stableId b.src (ordinalToString b.path) "tmp"
+                  , kindB     = BkSection
+                  , levelB    = Nothing
+                  , textB     = Nothing
+                  , attrsB    = mempty
+                  , childrenB = [] }
+      b1 = push tmp b
+      b2 = k b1
+  in case b2.stack of
+       (cur:parents) -> (cur.childrenB, b2 { stack = parents })
+       _             -> ([], b) -- shouldn't happen
+
 
 -- Push child under the current top of the stack
 pushChild :: Block -> Build -> Build
@@ -187,18 +244,23 @@ appendToTop child b = case b.stack of
   []     -> b { stack = [child] }
   (t:ts) -> b { stack = (t { childrenB = t.childrenB <> [child] }) : ts }
 
+
+getRootFromStack :: Build -> Block
+getRootFromStack b = case b.stack of
+  [] -> rootBlock (stableId b.src "root" "")
+  xs -> last xs
+
+
 -- Open a section at level n => pop to level n-1, append, push
 openSection :: Int -> Text -> M.Map Text Text -> Build -> Build
-openSection lvl title attrs b =
-  let (kept, _) = span (\blk -> fromMaybe 0 blk.levelB < lvl) (reverse b.stack)
-      base = case reverse kept of
-        []     -> [rootBlock (stableId b.src "root" (T.unpack title))]
-        xs     -> xs
-      -- compute new ordinal path
-      newPath = take (lvl - 1) b.path <> [nextOrdinal lvl b]
-      bid = stableId b.src (ordinalToString newPath) (T.unpack title)
-      sec = mkSection lvl title attrs bid
-  in Build { stack = sec : base, path = newPath, src = b.src }
+openSection lvl title attrs b0 =
+  let parentLvl = max 0 (lvl - 1)
+      b1        = closeToLevel parentLvl b0              -- bubble down to the right parent
+      bid       = stableId b1.src (ordinalToString b1.path) (T.unpack title)
+      sec       = mkSection lvl title attrs bid
+      newPath   = take parentLvl b1.path <> [nextOrdinal lvl b1]
+  in push sec b1 { path = newPath }                       -- push, do NOT append to parent yet
+
 
 nextOrdinal :: Int -> Build -> Int
 nextOrdinal lvl b =
@@ -296,23 +358,21 @@ loadBlocks b (blk:rest) = case blk of
 
   PT.BulletList items ->
     let (b', liBlocks) = foldList b items
-        bid = stableId b'.src (ordinalToString b'.path) "list"
-        lst = mkList bid liBlocks
+        bid            = stableId b'.src (ordinalToString b'.path) "list"
+        lst            = mkList bid liBlocks
     in loadBlocks (appendToTop lst b') rest
 
   PT.OrderedList _ items ->
     let (b', liBlocks) = foldList b items
-        bid = stableId b'.src (ordinalToString b'.path) "olist"
-        lst = mkList bid liBlocks
+        bid            = stableId b'.src (ordinalToString b'.path) "olist"
+        lst            = mkList bid liBlocks
     in loadBlocks (appendToTop lst b') rest
 
   PT.BlockQuote inner ->
-    let b' = loadBlocks b inner
-        bid = stableId b'.src (ordinalToString b'.path) "quote"
-        -- gather nodes appended during 'inner' and wrap them
-        (children, parent') = popChildrenFromTop b'
-        q = mkQuote bid children
-    in loadBlocks (appendToTop q parent') rest
+    let (kids, b1) = pushIsolated b (\b0 -> loadBlocks b0 inner)
+        bid        = stableId b1.src (ordinalToString b1.path) "quote"
+        q          = mkQuote bid kids
+    in loadBlocks (appendToTop q b1) rest
 
   PT.CodeBlock _ txt ->
     let bid = stableId b.src (ordinalToString b.path) (T.unpack (T.take 48 txt))
@@ -332,18 +392,14 @@ loadBlocks b (blk:rest) = case blk of
 
 -- Convert each list item ([[Block]]) into a BkListItem subtree
 foldList :: Build -> [[PT.Block]] -> (Build, [Block])
-foldList b0 [] = (b0, [])
+foldList b0 []     = (b0, [])
 foldList b0 (x:xs) =
-  let bid = stableId b0.src (ordinalToString b0.path) "li"
-      -- build in an isolated scope: push a synthetic container
-      container = Block { idB = bid, kindB = BkListItem, levelB = Nothing, textB = Nothing, attrsB = mempty, childrenB = [] }
-      b1 = replaceTop (top b0) b0
-      b2 = appendToTop container b1
-      b3 = loadBlocks b2 x
-      (kids, parentAfter) = popChildrenFromTop b3
-      li = mkListItem bid kids
-      (bNext, restLis) = foldList parentAfter xs
-  in (bNext, li : restLis)
+  let (kids, b1)     = pushIsolated b0 (\b -> loadBlocks b x)
+      liBid          = stableId b1.src (ordinalToString b1.path) "li"
+      li             = mkListItem liBid kids
+      (b2, restLis)  = foldList b1 xs
+  in (b2, li : restLis)
+
 
 top :: Build -> Block
 top b = case b.stack of
@@ -390,10 +446,10 @@ buildDoc promoteHdrs fp pandocDoc =
   let titleTxt = extractTitle pandocDoc
       meta = extractMeta pandocDoc
       PT.Pandoc _ blocks = pandocDoc
-      built = foldPandoc promoteHdrs fp blocks
+      built = bubbleAll (foldPandoc promoteHdrs fp blocks)  -- important
       root = case built.stack of
         []    -> rootBlock (stableId fp "root" (T.unpack titleTxt))
-        (r:_) -> r
+        (r:_) -> last built.stack
       docId = stableId fp "doc" (T.unpack titleTxt)
   in Doc { idD = docId, titleD = titleTxt, metaD = meta, blocksD = root.childrenB }
 
