@@ -49,15 +49,7 @@ startPg :: PgDbConfig -> ContT r IO Hp.Pool
 startPg dbC =
   let
     dbSettings = Hc.settings dbC.host dbC.port dbC.user dbC.passwd dbC.dbase
-    {-
-    pString :: ByteString
-    pString = "host=" <> dbC.host <> " port=" <> (T.encodeUtf8 . T.pack) (show dbC.port)
-          <> " user=" <> dbC.user <> " password=" <> dbC.passwd <> " dbname=" <> dbC.dbase
-    baseSettings = Hp.settings pString
-    -}
   in do
   liftIO . putStrLn $ "@[startPg] user: " <> show dbC.user <> " db: " <> show dbC.dbase <> "."
-  -- 0.10.1:
   ContT $ bracket (Hp.acquire dbC.poolSize dbC.acqTimeout dbC.poolTimeOut dbC.poolIdleTime dbSettings) Hp.release
-  -- 1.3: ContT $ bracket (Hp.acquire settings) Hp.release
 

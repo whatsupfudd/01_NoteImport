@@ -32,6 +32,7 @@ runWithOptions cliOptions fileOptions = do
             Opt.VersionCmd -> Cmd.versionCmd
             Opt.NotionCmd aWordspace -> Cmd.notionCmd aWordspace
             Opt.DocXCmd aDocXOpts -> Cmd.loadDoc aDocXOpts
+            Opt.IngestCmd aIngestOpts -> Cmd.runIngest aIngestOpts
       rtOptions <- Opt.mergeOptions cliOptions fileOptions envOptions
       result <- cmdExecutor rtOptions
       -- TODO: return a properly kind of conclusion.

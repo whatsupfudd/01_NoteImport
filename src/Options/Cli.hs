@@ -1,10 +1,13 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Options.Cli where
 
 import Data.Text (Text)
 import Options.Applicative
 
+import HBDoc.Types (EnrichmentLevel (..), StructureSource (..))
+import Options.Types
 
 newtype EnvOptions = EnvOptions {
     appHome :: Maybe Text
@@ -23,19 +26,12 @@ data GlobalOptions = GlobalOptions {
   }
 
 
-data DocXOpts = DocXOpts {
-  inPath :: FilePath
-  , outPath :: Maybe FilePath
-  , asYaml :: Bool
-  , promote :: Bool
-  } deriving stock (Show)
-
-
 data Command =
   HelpCmd
   | VersionCmd
   | NotionCmd Text
-  | DocXCmd DocXOpts
+  | DocXCmd DocXOpts    -- v1 parsing.
+  | IngestCmd IngestOpts
   deriving stock (Show)
 
 {- HERE: Additional structures for holding new command parameters:
@@ -107,6 +103,7 @@ commandDefs =
       , ("version", pure VersionCmd, "Shows the version number of importer.")
       , ("notion", notionOpts, "Notion command.")
       , ("docx", DocXCmd <$> docxOpts, "DocX command.")
+      , ("ingest", IngestCmd <$> ingestOpts, "Ingest command.")
       ]
     headArray = head cmdArray
     tailArray = tail cmdArray
@@ -120,6 +117,7 @@ notionOpts :: Parser Command
 notionOpts =
   NotionCmd <$> strArgument (metavar "WORDSPACE" <> help "Notion workspace to use.")
 
+-- v1 parser options:
 docxOpts :: Parser DocXOpts
 docxOpts =
   DocXOpts <$>
@@ -127,3 +125,81 @@ docxOpts =
     <*> optional (strOption (long "out" <> short 'o' <> help "Output file path" <> metavar "FILE"))
     <*> switch (long "yaml" <> help "Output as YAML" <> showDefault)
     <*> switch (long "promote" <> help "Promote numbered paragraphs to headers" <> showDefault)
+
+ingestOpts :: Parser IngestOpts
+ingestOpts =
+  IngestOpts
+    <$> formatP
+    <*> inputP
+    <*> structureP
+    <*> enrichP
+    <*> switch (long "keep-original" <> help "Retain original bytes in result")
+    <*> optional (strOption (long "title" <> metavar "TEXT" <> help "Override title"))
+    <*> optional (strOption (long "format-label" <> metavar "TEXT" <> help "Override format label (default: docx/html/markdown)"))
+    <*> outModeP
+    <*> optional (strOption (long "write-json" <> metavar "FILE" <> help "Write JSON to file (default: stdout)"))
+    <*> strOption (long "user" <> metavar "USERNAME" <> help "User" <> value "nobody")
+    <*> optional (option (eitherReader toDocId) (long "doc-id" <> metavar "DOCID" <> help "Document ID"))
+  where
+    toDocId aStr = case reads aStr of
+      [(n, "")] -> Right n
+      _ -> Left $ "Invalid doc id: " <> aStr
+
+    formatP :: Parser Format
+    formatP =
+      option (eitherReader toFmt)
+        ( long "format" <> short 'f' <> metavar "docx|html|markdown"
+       <> value FDocx <> showDefaultWith (const "docx")
+       <> help "Input format" )
+      where
+        toFmt s = case s of
+          "docx"     -> Right FDocx
+          "html"     -> Right FHtml
+          "markdown" -> Right FMarkdown
+          other      -> Left $ "Unknown format: " <> other
+
+    inputP :: Parser Input
+    inputP =
+      (FromFile <$> strOption (long "file" <> short 'i' <> metavar "FILE" <> help "Input file"))
+      <|> flag' FromStdin (long "stdin" <> help "Read from stdin")
+
+    structureP :: Parser StructureSource
+    structureP =
+      option (eitherReader toStruct)
+        ( long "structure" <> metavar "pandoc|xml|auto"
+       <> value StructureFromPandoc
+       <> showDefaultWith (const "pandoc")
+       <> help "Choose structural importer for DOCX" )
+      where
+        toStruct = \case
+          "pandoc" -> Right StructureFromPandoc
+          "xml"    -> Right StructureFromXml
+          "auto"   -> Right StructureAuto
+          other    -> Left $ "Unknown structure: " <> other
+
+    enrichP :: Parser EnrichmentLevel
+    enrichP =
+      option (eitherReader toEnrich)
+        ( long "enrich" <> metavar "none|min|full"
+       <> value EnrichDocxMinimal
+       <> showDefaultWith (const "min")
+       <> help "DOCX XML enrichment level" )
+      where
+        toEnrich = \case
+          "none" -> Right EnrichNone
+          "min"  -> Right EnrichDocxMinimal
+          "full" -> Right EnrichDocxFull
+          other  -> Left $ "Unknown enrich: " <> other
+
+    outModeP :: Parser OutMode
+    outModeP =
+      option (eitherReader toOut)
+        ( long "out" <> metavar "json|pretty"
+       <> value OutPretty
+       <> showDefaultWith (const "pretty")
+       <> help "Output mode" )
+      where
+        toOut = \case
+          "json"   -> Right OutJson
+          "pretty" -> Right OutPretty
+          other    -> Left $ "Unknown out mode: " <> other

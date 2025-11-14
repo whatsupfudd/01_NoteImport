@@ -49,6 +49,8 @@ dependencies:
   - hasql
   - hasql-th
   - hasql-pool
+  - hasql-transaction
+  - profunctors
   # For scientific:
   - scientific
   # For pandoc:
@@ -61,6 +63,9 @@ dependencies:
   - base16-bytestring
   - aeson
   - aeson-pretty
+  - zip-archive
+  - xml-conduit
+
 
 default-extensions:
 - OverloadedStrings
