@@ -14,15 +14,22 @@ import qualified Options.Runtime as Rto
 import qualified OpenAI.Json.Reader as Jd
 import qualified OpenAI.Parse as Op
 
-parseCmd :: FilePath -> Rto.RunOptions -> IO ()
-parseCmd filePath rtOpts = do
+parseCmd :: (FilePath, Bool) -> Rto.RunOptions -> IO ()
+parseCmd (filePath, exportFlag) rtOpts = do
   jsonContent <- BS.readFile filePath
-  case Ae.eitherDecode jsonContent :: Either String Jd.Discussion of
+  let
+    rezA = if exportFlag then
+      Ae.eitherDecode jsonContent :: Either String [Jd.Discussion]
+    else
+      L.singleton <$> (Ae.eitherDecode jsonContent :: Either String Jd.Discussion)
+  case rezA of
     Left err -> putStrLn $ "Parsing failed: " ++ err
-    Right discussion -> do
-      -- putStrLn "Parsing successful. Loaded Discussion:"
-      -- print discussion
-      -- Example of using OverloadedRecordDot: access title
-      putStrLn $ "Title: " ++ discussion.titleCv
-      Op.analyzeDiscussion discussion
+    Right discussions -> do
+      mapM_ (\discussion -> do
+          -- putStrLn "Parsing successful. Loaded Discussion:"
+          -- print discussion
+          -- Example of using OverloadedRecordDot: access title
+          putStrLn . unpack $ "Title: " <> discussion.titleCv <> ", id: " <> discussion.convIdCv
+          Op.analyzeDiscussion discussion
+        ) discussions
 

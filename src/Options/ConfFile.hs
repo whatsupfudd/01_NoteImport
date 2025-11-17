@@ -64,7 +64,7 @@ instance Aes.FromJSON PairReference where
 
 defaultConfName :: FilePath
 -- HERE: modify config file to .config/noteimp.yaml or .noteimp/config.yaml
-defaultConfName = ".fudd/noteimp/config.yaml"
+defaultConfName = ".fudd/docimp/config.yaml"
 
 
 defaultConfigFilePath :: IO (Either String FilePath)

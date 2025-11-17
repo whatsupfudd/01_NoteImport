@@ -7,6 +7,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as Mp
 import Data.Text (Text)
+import qualified Data.Text as T
 
 import System.Environment (getArgs)
 
@@ -18,19 +19,20 @@ import GHC.Generics (Generic)
 
 
 -- Helper to convert Object to Map String Value
-objectToMap :: Object -> Mp.Map String Value
+objectToMap :: Object -> Mp.Map Text Value
 objectToMap anObject =
   let
     keyMap = Km.toMap anObject
   in
-    Mp.mapKeys show keyMap
+    Mp.mapKeys (T.pack . show) keyMap
 
 
 data Discussion = Discussion {
-  titleCv :: String,
+  titleCv :: Text,
   createTimeCv :: Double,
   updateTimeCv :: Double,
-  mappingCv :: Mp.Map String Node
+  mappingCv :: Mp.Map Text Node,
+  convIdCv :: Text
 } deriving (Show)
 
 instance FromJSON Discussion where
@@ -40,13 +42,14 @@ instance FromJSON Discussion where
       <*> o .: "create_time"
       <*> o .: "update_time"
       <*> o .: "mapping"
+      <*> o .: "conversation_id"
 
 
 data Node = Node {
-  idNd :: String,
+  idNd :: Text,
   messageNd :: Maybe Message,
-  parentNd :: Maybe String,
-  childrenNd :: [String]
+  parentNd :: Maybe Text,
+  childrenNd :: [Text]
 } deriving (Show)
 
 instance FromJSON Node where
@@ -58,17 +61,17 @@ instance FromJSON Node where
 
 
 data Message = Message {
-  idMsg :: String,
+  idMsg :: Text,
   authorMsg :: Author,
   createTimeMsg :: Maybe Double,
   updateTimeMsg :: Maybe Double,
   contentMsg :: Content,
-  statusMsg :: String,
+  statusMsg :: Text,
   endTurnMsg :: Maybe Bool,
   weightMsg :: Double,
-  metadataMsg :: Mp.Map String Value,
-  recipientMsg :: String,
-  channelMsg :: Maybe String
+  metadataMsg :: Mp.Map Text Value,
+  recipientMsg :: Text,
+  channelMsg :: Maybe Text
 } deriving (Show)
 
 instance FromJSON Message where
@@ -87,9 +90,9 @@ instance FromJSON Message where
 
 
 data Author = Author {
-  roleAu :: String,
-  nameAu :: Maybe String,
-  metadataAu :: Mp.Map String Value
+  roleAu :: Text,
+  nameAu :: Maybe Text,
+  metadataAu :: Mp.Map Text Value
 } deriving (Show)
 
 instance FromJSON Author where
@@ -101,31 +104,31 @@ instance FromJSON Author where
 
 data Content =
   TextContent {
-      partsCt :: [String]
+      partsCt :: [Text]
     }
   | ModelEditableContext {
-      modelSetContextMec :: String,
+      modelSetContextMec :: Text,
       repositoryMec :: Maybe Value,
       repoSummaryMec :: Maybe Value,
       structuredContextMec :: Maybe Value
     }
   | ThoughtsContent {
       thoughtsTc :: [Thought],
-      sourceAnalysisMsgIdTc :: String
+      sourceAnalysisMsgIdTc :: Text
     }
   | CodeContent {
-      languageCc :: String,
-      responseFormatNameCc :: Maybe String,
-      textCc :: String
+      languageCc :: Text,
+      responseFormatNameCc :: Maybe Text,
+      textCc :: Text
     }
   | OtherContent {
-    contentTypeOc :: String,
-    rawOc :: Mp.Map String Value
+    contentTypeOc :: Text,
+    rawOc :: Mp.Map Text Value
   } deriving (Show)
 
 instance FromJSON Content where
   parseJSON = withObject "Content" $ \o -> do
-    ctype :: String <- o .: "content_type"
+    ctype :: Text <- o .: "content_type"
     case ctype of
       "text" -> TextContent <$> o .: "parts"
       "model_editable_context" -> ModelEditableContext
@@ -144,16 +147,16 @@ instance FromJSON Content where
 
 
 data Thought = Thought {
-  summaryTh :: String,
-  contentTh :: String,
-  chunksTh :: [Value],
-  finishedTh :: Bool
+  summaryTh :: Text,
+  contentTh :: Text,
+  chunksTh :: Maybe [Value],
+  finishedTh :: Maybe Bool
 } deriving (Show, Generic)
 
 instance FromJSON Thought where
   parseJSON = withObject "Thought" $ \o -> Thought
     <$> o .: "summary"
     <*> o .: "content"
-    <*> o .: "chunks"
-    <*> o .: "finished"
+    <*> o .:? "chunks"
+    <*> o .:? "finished"
 
