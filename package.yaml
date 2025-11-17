@@ -1,6 +1,6 @@
-name:                noteimp
+name:                docimp
 version:             0.1.0.0
-github:              "hugdro/noteimp"
+github:              "hugdro/docimp"
 license:             BSD3
 author:              "Hugo DesRosiers"
 maintainer:          "hugo.desrosiers@boardingcities.com"
@@ -17,7 +17,7 @@ extra-source-files:
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/whatsupfudd/noteimp#readme>
+description:         Please see the README on GitHub at <https://github.com/whatsupfudd/docimp#readme>
 
 dependencies:
   - aeson
@@ -28,6 +28,7 @@ dependencies:
   - time
   - vector
   - containers
+  - unordered-containers
   # For YAML (config file):
   - yaml
   - directory
@@ -88,7 +89,7 @@ library:
   source-dirs: src
 
 executables:
-  noteimp:
+  docimp:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -96,10 +97,10 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - noteimp
+    - docimp
 
 tests:
-  noteimp-test:
+  docimp-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
@@ -107,4 +108,4 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - noteimp
+    - docimp

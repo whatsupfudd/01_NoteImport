@@ -32,6 +32,7 @@ data Command =
   | NotionCmd Text
   | DocXCmd DocXOpts    -- v1 parsing.
   | IngestCmd IngestOpts
+  | OaiJsonCmd FilePath
   deriving stock (Show)
 
 {- HERE: Additional structures for holding new command parameters:
@@ -104,6 +105,7 @@ commandDefs =
       , ("notion", notionOpts, "Notion command.")
       , ("docx", DocXCmd <$> docxOpts, "DocX command.")
       , ("ingest", IngestCmd <$> ingestOpts, "Ingest command.")
+      , ("oaijson", OaiJsonCmd <$> oaiJsonOpts, "OpenAI JSON command.")
       ]
     headArray = head cmdArray
     tailArray = tail cmdArray
@@ -203,3 +205,7 @@ ingestOpts =
           "json"   -> Right OutJson
           "pretty" -> Right OutPretty
           other    -> Left $ "Unknown out mode: " <> other
+
+oaiJsonOpts :: Parser FilePath
+oaiJsonOpts =
+  strArgument (metavar "JSONFILE" <> help "JSON file file path")

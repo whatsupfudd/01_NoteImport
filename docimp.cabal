@@ -4,11 +4,11 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 
-name:           noteimp
+name:           docimp
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/whatsupfudd/noteimp#readme>
-homepage:       https://github.com/hugdro/noteimp#readme
-bug-reports:    https://github.com/hugdro/noteimp/issues
+description:    Please see the README on GitHub at <https://github.com/whatsupfudd/docimp#readme>
+homepage:       https://github.com/hugdro/docimp#readme
+bug-reports:    https://github.com/hugdro/docimp/issues
 author:         Hugo DesRosiers
 maintainer:     hugo.desrosiers@boardingcities.com
 copyright:      None.
@@ -21,7 +21,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/hugdro/noteimp
+  location: https://github.com/hugdro/docimp
 
 library
   exposed-modules:
@@ -30,6 +30,7 @@ library
       Commands.Help
       Commands.Ingest
       Commands.Notion
+      Commands.OpenAI
       Commands.Version
       DB.Connect
       DB.Operations
@@ -43,13 +44,15 @@ library
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
+      OpenAI.Json.Reader
+      OpenAI.Parse
       Options
       Options.Cli
       Options.ConfFile
       Options.Runtime
       Options.Types
   other-modules:
-      Paths_noteimp
+      Paths_docimp
   hs-source-dirs:
       src
   default-extensions:
@@ -87,6 +90,7 @@ library
     , text
     , time
     , unix
+    , unordered-containers
     , uuid
     , vector
     , xml-conduit
@@ -94,10 +98,10 @@ library
     , zip-archive
   default-language: Haskell2010
 
-executable noteimp
+executable docimp
   main-is: Main.hs
   other-modules:
-      Paths_noteimp
+      Paths_docimp
   hs-source-dirs:
       app
   default-extensions:
@@ -114,6 +118,7 @@ executable noteimp
     , containers
     , cryptonite
     , directory
+    , docimp
     , filepath
     , gitrev
     , hashable
@@ -126,7 +131,6 @@ executable noteimp
     , megaparsec
     , memory
     , mtl
-    , noteimp
     , optparse-applicative
     , pandoc >=3.1
     , pandoc-types
@@ -136,6 +140,7 @@ executable noteimp
     , text
     , time
     , unix
+    , unordered-containers
     , uuid
     , vector
     , xml-conduit
@@ -143,11 +148,11 @@ executable noteimp
     , zip-archive
   default-language: Haskell2010
 
-test-suite noteimp-test
+test-suite docimp-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      Paths_noteimp
+      Paths_docimp
   hs-source-dirs:
       test
   default-extensions:
@@ -164,6 +169,7 @@ test-suite noteimp-test
     , containers
     , cryptonite
     , directory
+    , docimp
     , filepath
     , gitrev
     , hashable
@@ -176,7 +182,6 @@ test-suite noteimp-test
     , megaparsec
     , memory
     , mtl
-    , noteimp
     , optparse-applicative
     , pandoc >=3.1
     , pandoc-types
@@ -186,6 +191,7 @@ test-suite noteimp-test
     , text
     , time
     , unix
+    , unordered-containers
     , uuid
     , vector
     , xml-conduit

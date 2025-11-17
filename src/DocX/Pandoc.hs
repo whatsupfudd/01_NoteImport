@@ -540,9 +540,9 @@ nestListsUnderPreviousText = nestFold []
     isTextHost :: Block -> Bool
     isTextHost blk =
       case kindBlk blk of
-        ParagraphBK   -> True
-        HeadingBK _   -> True
-        _             -> False
+        ParagraphBK -> True
+        HeadingBK _ -> True
+        _ -> False
 
 
 --------------------------------------------------------------------------------

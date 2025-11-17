@@ -4,6 +4,7 @@ module Commands  (
   , module Commands.Notion
   , module Commands.DocX
   , module Commands.Ingest
+  , module Commands.OpenAI
  )
 where
 
@@ -12,3 +13,4 @@ import Commands.Version
 import Commands.Notion
 import Commands.DocX
 import Commands.Ingest
+import Commands.OpenAI

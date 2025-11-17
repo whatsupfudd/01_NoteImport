@@ -6,7 +6,7 @@ import qualified Options.Runtime as Rto
 
 import Data.Version (showVersion)
 import Development.GitRev (gitHash, gitCommitDate)
-import Paths_noteimp (version)
+import Paths_docimp (version)
 
 versionCmd :: Rto.RunOptions -> IO ()
 versionCmd _ = do
