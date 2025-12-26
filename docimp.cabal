@@ -45,7 +45,9 @@ library
       MainLogic
       Notion.Fetch
       OpenAI.Json.Reader
+      OpenAI.Operations
       OpenAI.Parse
+      OpenAI.Statements
       Options
       Options.Cli
       Options.ConfFile

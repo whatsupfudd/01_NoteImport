@@ -2,7 +2,7 @@ module OpenAI.Parse where
 
 import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -11,18 +11,24 @@ import qualified Options.Runtime as Rto
 import qualified OpenAI.Json.Reader as Jd
 
 
-analyzeDiscussion :: Jd.Discussion -> IO ()
+analyzeDiscussion :: Jd.Discussion -> Text
 analyzeDiscussion discussion =
   let
     -- rootChild = Mp.lookup "client-created-root" discussion.mappingCv
-    fsmResult = runFSM initContext discussion.mappingCv "client-created-root"
-    messages = reverse fsmResult.messages
+    mbRootNode = findRootNode discussion.mappingCv
   in
-  {- case rootChild of
-    Just node -> mapM_ (analyseChild discussion.mappingCv 0) node.childrenNd
-    Nothing -> putStrLn "No root child found"
-  -}
-  mapM_ (putStrLn . T.unpack . showMessage) messages
+  case mbRootNode of
+    Just rootNode ->
+      let
+        fsmResult = runFSM initContext discussion.mappingCv rootNode.idNd
+        messages = reverse fsmResult.messages
+      in
+      {- case rootChild of
+        Just node -> mapM_ (analyseChild discussion.mappingCv 0) node.childrenNd
+        Nothing -> putStrLn "No root child found"
+      -}
+      T.intercalate "\n" (map showMessage messages)
+    Nothing -> "@[analyzeDiscussion] no root node found for discussion: " <> discussion.titleCv <> ", id: " <> discussion.convIdCv
 
 
 showMessage :: MessageFsm -> Text
@@ -52,7 +58,7 @@ showSubAction subAction =
   case subAction of
     IntermediateSA text -> "---- Intermediate ---\n" <> text
     ReflectionSA reflection -> "---- Reflection ---\n" <> reflection.summaryRF <> "\n" <> reflection.contentRF <> "\n" <> T.pack (show reflection.chunksRF) <> "\n" <> T.pack (show reflection.finishedRF)
-    CodeSA code -> "---- Code ---\n" <> code.languageCC <> "\n" <> maybe "No response format name" (\name -> name) code.responseFormatNameCC <> "\n" <> code.textCC
+    CodeSA code -> "---- Code ---\n" <> code.languageCC <> "\n" <> maybe "No response format name" id code.responseFormatNameCC <> "\n" <> code.textCC
     ToolCallSA toolCall -> "---- ToolCall ---\n" <> toolCall.toolNameTC <> "\n" <> toolCall.toolInputTC
     _ -> "---- Unknown ---\n" <> T.pack (show subAction)
 
@@ -170,7 +176,7 @@ runFSM context mapping nodeID =
 handleUserMsg :: Context -> Jd.Message -> Context
 handleUserMsg context message =
   case message.contentMsg of
-    Jd.TextContent parts ->
+    Jd.TextCT parts ->
       let
         userMsg = UserMessage {
           textUM = T.intercalate " |<part>| " parts
@@ -207,7 +213,7 @@ handleAssistantMsg context message =
         let
           updMsg = case astMsg of
             AssistantMF timing prevMsg ->
-              AssistantMF timing prevMsg { 
+              AssistantMF timing prevMsg {
                   subActions = reverse prevMsg.subActions
                   , response = Just $ buildAssistantResponse (Just prevMsg) message
                 }
@@ -223,7 +229,7 @@ handleAssistantMsg context message =
       }
     in
     case message.contentMsg of
-      Jd.TextContent parts ->
+      Jd.TextCT parts ->
         let
           subAction = IntermediateSA (T.intercalate " |<part>| " parts)
           ieNewMsg = case context.currentMsg of
@@ -245,7 +251,7 @@ handleAssistantMsg context message =
         case ieNewMsg of
           Left errMsg -> context { issues = errMsg : context.issues }
           Right newMsg -> context { currentMsg = Just newMsg }
-      Jd.ThoughtsContent thoughts sourceAnalysisMsgId ->
+      Jd.ThoughtsCT thoughts sourceAnalysisMsgId ->
         let
           subActions = map (\aThought -> ReflectionSA Reflection {
                 summaryRF =  aThought.summaryTh
@@ -268,7 +274,7 @@ handleAssistantMsg context message =
         case ieNewMsg of
           Left errMsg -> context { issues = errMsg : context.issues }
           Right newMsg -> context { currentMsg = Just newMsg }
-      Jd.CodeContent language responseFormatName text ->
+      Jd.CodeCT language responseFormatName text ->
         let
           subAction = CodeSA Code {
             languageCC = language
@@ -290,9 +296,9 @@ handleAssistantMsg context message =
         case ieNewMsg of
           Left errMsg -> context { issues = errMsg : context.issues }
           Right newMsg -> context { currentMsg = Just newMsg }
-      Jd.ModelEditableContext modelSetContext repository repoSummary structuredContext ->
+      Jd.ModelEditableContextCT modelSetContext repository repoSummary structuredContext ->
         context
-      Jd.OtherContent contentType raw ->
+      Jd.OtherCT contentType raw ->
         context
 
 
@@ -307,19 +313,19 @@ buildAssistantResponse mbAstMsg jsonMsg =
 respFromContent :: Jd.Content -> ResponseAst
 respFromContent content =
   case content of
-    Jd.TextContent parts -> ResponseAst {
+    Jd.TextCT parts -> ResponseAst {
       textRA = T.intercalate " |<part>| " parts
     }
-    Jd.ModelEditableContext modelSetContext repository repoSummary structuredContext -> ResponseAst {
+    Jd.ModelEditableContextCT modelSetContext repository repoSummary structuredContext -> ResponseAst {
       textRA = "ModelEditableContext: " <> modelSetContext
     }
-    Jd.ThoughtsContent thoughts sourceAnalysisMsgId -> ResponseAst {
+    Jd.ThoughtsCT thoughts sourceAnalysisMsgId -> ResponseAst {
       textRA = "ThoughtsContent: " <> sourceAnalysisMsgId
     }
-    Jd.CodeContent language responseFormatName text -> ResponseAst {
+    Jd.CodeCT language responseFormatName text -> ResponseAst {
       textRA = "CodeContent: " <> text
     }
-    Jd.OtherContent contentType raw -> ResponseAst {
+    Jd.OtherCT contentType raw -> ResponseAst {
       textRA = "OtherContent: " <> contentType <> " " <> (T.pack . show) raw
     }
 
@@ -348,3 +354,10 @@ handleToolMsg context message =
     }
   in
   context { messages = ToolMF timing toolMsg : context.messages }
+
+findRootNode :: Mp.Map Text Jd.Node -> Maybe Jd.Node
+findRootNode mapping =
+  case Mp.lookup "client-created-root" mapping of
+    Just node -> Just node
+    Nothing ->
+      L.find (\node -> isNothing node.parentNd) $ Mp.elems mapping

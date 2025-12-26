@@ -101,27 +101,65 @@ instance FromJSON Author where
     <*> o .:? "name"
     <*> (objectToMap <$> o .: "metadata")
 
+{-
+content types and frequencies on 577 discussions::
+ code                    |  2787
+ execution_output        |   726
+ multimodal_text         |   747
+ reasoning_recap         |  1774
+ system_error            |    38
+ tether_browsing_display |   159
+ tether_quote            |   215
+ text                    | 14865
+ thoughts                |  3356
+-}
 
 data Content =
-  TextContent {
-      partsCt :: [Text]
+    CodeCT {
+      languageCc :: Text,
+      responseFormatNameCc :: Maybe Text,
+      textCc :: Text
     }
-  | ModelEditableContext {
+  | ExecutionOutputCT {
+    textEoc :: Text
+  }
+  | MultimodalTextCT {
+    partsMtc :: [MultiModalPart]
+  }
+  | ModelEditableContextCT {
       modelSetContextMec :: Text,
       repositoryMec :: Maybe Value,
       repoSummaryMec :: Maybe Value,
       structuredContextMec :: Maybe Value
     }
-  | ThoughtsContent {
+  | ReasoningRecapCT {
+    contentRrc :: Text
+  }
+  | SystemErrorCT {
+    nameSes :: Text
+    , textSes :: Text
+  }
+  | TetherBrowsingDisplayCT {
+      resultTbd :: Text
+    , summaryTbd :: Maybe Text
+    , assetsTbd :: Maybe [Value]
+    , tetherIDTbd :: Maybe Text
+  }
+  | TetherQuoteCT {
+    urlTq :: Text
+    , domainTq :: Text
+    , textTq :: Text
+    , titleTq :: Text
+    , tetherIDTq :: Maybe Text
+  }
+  | TextCT {
+      partsCt :: [Text]
+    }
+  | ThoughtsCT {
       thoughtsTc :: [Thought],
       sourceAnalysisMsgIdTc :: Text
     }
-  | CodeContent {
-      languageCc :: Text,
-      responseFormatNameCc :: Maybe Text,
-      textCc :: Text
-    }
-  | OtherContent {
+  | OtherCT {
     contentTypeOc :: Text,
     rawOc :: Mp.Map Text Value
   } deriving (Show)
@@ -130,20 +168,215 @@ instance FromJSON Content where
   parseJSON = withObject "Content" $ \o -> do
     ctype :: Text <- o .: "content_type"
     case ctype of
-      "text" -> TextContent <$> o .: "parts"
-      "model_editable_context" -> ModelEditableContext
+      "code" -> CodeCT
+        <$> o .: "language"
+        <*> o .:? "response_format_name"
+        <*> o .: "text"
+      "execution_output" -> ExecutionOutputCT <$> o .: "text"
+      "multimodal_text" -> MultimodalTextCT <$> o .: "parts"
+      "model_editable_context" -> ModelEditableContextCT
         <$> o .: "model_set_context"
         <*> o .:? "repository"
         <*> o .:? "repo_summary"
         <*> o .:? "structured_context"
-      "thoughts" -> ThoughtsContent
+      "reasoning_recap" -> ReasoningRecapCT <$> o .: "content"
+      "system_error" -> SystemErrorCT
+        <$> o .: "name"
+        <*> o .: "text"
+      "tether_browsing_display" -> TetherBrowsingDisplayCT
+        <$> o .: "result"
+        <*> o .:? "summary"
+        <*> o .:? "assets"
+        <*> o .:? "tether_id"
+      "tether_quote" -> TetherQuoteCT
+        <$> o .: "url"
+        <*> o .: "domain"
+        <*> o .: "text"
+        <*> o .: "title"
+        <*> o .:? "tether_id"
+      "text" -> TextCT <$> o .: "parts"
+      "thoughts" -> ThoughtsCT
         <$> o .: "thoughts"
         <*> o .: "source_analysis_msg_id"
-      "code" -> CodeContent
-        <$> o .: "language"
-        <*> o .:? "response_format_name"
-        <*> o .: "text"
-      _ -> OtherContent ctype <$> pure (objectToMap o)
+      _ -> pure $ OtherCT ctype (objectToMap o)
+
+-- Eventually MultiModalPart will be a sum type of all possible part types.
+data MultiModalPart =
+  TextPT Text
+  | AudioTranscriptionPT {
+    textAtp :: Text,
+    directionAtp :: Text,
+    decodingIdAtp :: Maybe Text
+  }
+  | AudioAssetPointerPT AudioAssetPointer
+  | ImageAssetPointerPT {
+    assetPointerPap :: Text,
+    sizeBytesPap :: Int,
+    widthPap :: Int,
+    heightPap :: Int,
+    foveaPap :: Maybe Value,
+    metadataPap :: Maybe ImageMetadata
+  }
+  | RealTimeUserAVPT {
+    expiryDatetimeRtuav :: Maybe Value
+    , framesAssetPointersRtuav :: [Value]
+    , videoContainerAssetPointer :: Maybe Value
+    , audioAssetPointer :: AudioAssetPointer
+    , audioStartTimestampRtuav :: Maybe Double
+  }
+  deriving (Show, Generic)
+
+
+instance FromJSON MultiModalPart where
+  parseJSON aValue =
+    case aValue of
+      String aText -> pure $ TextPT aText
+      Object o -> do
+        ptype :: Text <- o .: "content_type"
+        case ptype of
+          "audio_transcription" -> AudioTranscriptionPT
+            <$> o .: "text"
+            <*> o .: "direction"
+            <*> o .:? "decoding_id"
+          "audio_asset_pointer" -> AudioAssetPointerPT <$> parseJSON (Object o)
+          "image_asset_pointer" -> ImageAssetPointerPT
+            <$> o .: "asset_pointer"
+            <*> o .: "size_bytes"
+            <*> o .: "width"
+            <*> o .: "height"
+            <*> o .: "fovea"
+            <*> o .:? "metadata"
+          "real_time_user_audio_video_asset_pointer" -> RealTimeUserAVPT
+            <$> o .:? "expiry_datetime"
+            <*> o .: "frames_asset_pointers"
+            <*> o .:? "video_container_asset_pointer"
+            <*> o .: "audio_asset_pointer"
+            <*> o .:? "audio_start_timestamp"
+          _ -> fail $ "Unknown part type: " <> T.unpack ptype
+      _ -> fail $ "@[MultiModalPart.parseJSON] unexpected value: " <> show aValue
+
+
+
+data AudioAssetPointer = AudioAssetPointer {
+  expiryDatetimeAap :: Maybe Value,
+  assetPointerAap :: Text,
+  sizeBytesAap :: Int,
+  formatAap :: Text,
+  toolAudioDirectionAap :: Maybe Text,
+  metadataAap :: Maybe AudioMetadata
+} deriving (Show, Generic)
+
+instance FromJSON AudioAssetPointer where
+  parseJSON = withObject "AudioAssetPointer" $ \o -> AudioAssetPointer
+    <$> o .:? "expiry_datetime"
+    <*> o .: "asset_pointer"
+    <*> o .: "size_bytes"
+    <*> o .: "format"
+    <*> o .:? "tool_audio_direction"
+    <*> o .: "metadata"
+
+
+data Dalle = Dalle {
+  genIdDa :: Maybe Text,
+  promptDa :: Text,
+  seedDa :: Maybe Int,
+  parentGenIdDa :: Maybe Text,
+  editOpDa :: Maybe Text,
+  serializationTitleDa :: Text
+} deriving (Show, Generic)
+
+instance FromJSON Dalle where
+  parseJSON = withObject "Dalle" $ \o -> Dalle
+    <$> o .:? "gen_id"
+    <*> o .: "prompt"
+    <*> o .:? "seed"
+    <*> o .:? "parent_gen_id"
+    <*> o .:? "edit_op"
+    <*> o .: "serialization_title"
+
+
+data Generation = Generation {
+  genIdGe :: Maybe Text,
+  genSizeGe :: Text,
+  seedGe :: Maybe Int,
+  parentGenIdGe :: Maybe Text,
+  heightGe :: Int,
+  widthGe :: Int,
+  transparentBackgroundGe :: Bool,
+  serializationTitleGe :: Text,
+  orientationGe :: Maybe Text
+} deriving (Show, Generic)
+
+instance FromJSON Generation where
+  parseJSON = withObject "Generation" $ \o -> Generation
+    <$> o .:? "gen_id"
+    <*> o .: "gen_size"
+    <*> o .:? "seed"
+    <*> o .:? "parent_gen_id"
+    <*> o .: "height"
+    <*> o .: "width"
+    <*> o .: "transparent_background"
+    <*> o .: "serialization_title"
+    <*> o .:? "orientation"
+
+
+data ImageMetadata = ImageMetadata {
+  dalleMd :: Maybe Dalle,
+  gizmoMd :: Maybe Value,
+  generationMd :: Maybe Generation,
+  containerPixelHeightMd :: Maybe Int,
+  containerPixelWidthMd :: Maybe Int,
+  emuOmitGlimpseImageMd :: Maybe Value,
+  emuPatchesOverrideMd :: Maybe Value,
+  lpeKeepPatchIjhwMd :: Maybe Value,
+  lpeDeltaEncodingChannelMd :: Maybe Value,
+  sanitizedMd :: Bool,
+  assetPointerLinkMd :: Maybe Value,
+  watermarkedAssetPointerMd :: Maybe Value,
+  isNoAuthPlaceholderMd :: Maybe Value
+} deriving (Show, Generic)
+
+instance FromJSON ImageMetadata where
+  parseJSON = withObject "Metadata" $ \o -> ImageMetadata
+    <$> o .:? "dalle"
+    <*> o .:? "gizmo"
+    <*> o .:? "generation"
+    <*> o .: "container_pixel_height"
+    <*> o .: "container_pixel_width"
+    <*> o .:? "emu_omit_glimpse_image"
+    <*> o .:? "emu_patches_override"
+    <*> o .:? "lpe_keep_patch_ijhw"
+    <*> o .:? "lpe_delta_encoding_channel"
+    <*> o .: "sanitized"
+    <*> o .:? "asset_pointer_link"
+    <*> o .:? "watermarked_asset_pointer"
+    <*> o .:? "is_no_auth_placeholder"
+
+
+data AudioMetadata = AudioMetadata {
+  startTimestampAm :: Maybe Value,
+  endTimestampAm :: Maybe Value,
+  pretokenizedVqAm :: Maybe Value,
+  interruptionsAm :: Maybe Value,
+  originalAudioSourceAm :: Maybe Value,
+  transcriptionAm :: Maybe Value,
+  wordTranscriptionAm :: Maybe Value,
+  startAm :: Double,
+  endAm :: Double
+} deriving (Show, Generic)
+
+
+instance FromJSON AudioMetadata where
+  parseJSON = withObject "AudioMetadata" $ \o -> AudioMetadata
+    <$> o .:? "start_timestamp"
+    <*> o .:? "end_timestamp"
+    <*> o .:? "pretokenized_vq"
+    <*> o .:? "interruptions"
+    <*> o .:? "original_audio_source"
+    <*> o .:? "transcription"
+    <*> o .:? "word_transcription"
+    <*> o .: "start"
+    <*> o .: "end"
 
 
 data Thought = Thought {
