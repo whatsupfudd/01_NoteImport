@@ -45,3 +45,8 @@ data IngestOpts = IngestOpts
   } deriving stock (Show)
 
 
+data OaiOpts = OaiOpts {
+  exportB :: !Bool
+  , printB :: !Bool
+  , jsonFile :: !FilePath
+  } deriving stock (Show)

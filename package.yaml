@@ -45,6 +45,7 @@ dependencies:
   # For HTTP:
   - http-client
   - http-client-tls
+  - http-types
   # For SQL:
   - postgresql-binary
   - hasql
@@ -66,6 +67,8 @@ dependencies:
   - aeson-pretty
   - zip-archive
   - xml-conduit
+  # For oai to .docx gen:
+  - data-default
 
 
 default-extensions:

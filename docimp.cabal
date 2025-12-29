@@ -44,10 +44,13 @@ library
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
+      OpenAI.GenDocx
+      OpenAI.InOperations
       OpenAI.Json.Reader
       OpenAI.Operations
       OpenAI.Parse
       OpenAI.Statements
+      OpenAI.Types
       Options
       Options.Cli
       Options.ConfFile
@@ -70,6 +73,7 @@ library
     , bytestring
     , containers
     , cryptonite
+    , data-default
     , directory
     , filepath
     , gitrev
@@ -80,6 +84,7 @@ library
     , hasql-transaction
     , http-client
     , http-client-tls
+    , http-types
     , megaparsec
     , memory
     , mtl
@@ -119,6 +124,7 @@ executable docimp
     , bytestring
     , containers
     , cryptonite
+    , data-default
     , directory
     , docimp
     , filepath
@@ -130,6 +136,7 @@ executable docimp
     , hasql-transaction
     , http-client
     , http-client-tls
+    , http-types
     , megaparsec
     , memory
     , mtl
@@ -170,6 +177,7 @@ test-suite docimp-test
     , bytestring
     , containers
     , cryptonite
+    , data-default
     , directory
     , docimp
     , filepath
@@ -181,6 +189,7 @@ test-suite docimp-test
     , hasql-transaction
     , http-client
     , http-client-tls
+    , http-types
     , megaparsec
     , memory
     , mtl
