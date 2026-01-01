@@ -69,6 +69,8 @@ dependencies:
   - xml-conduit
   # For oai to .docx gen:
   - data-default
+  # For HTML scraping:
+  - scalpel
 
 
 default-extensions:

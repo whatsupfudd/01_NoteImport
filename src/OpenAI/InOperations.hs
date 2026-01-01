@@ -23,6 +23,7 @@ import qualified Data.Vector as V
 import Hasql.Statement (Statement)
 import qualified Hasql.Pool as Hp
 import qualified Hasql.TH as TH
+import qualified Hasql.Session as Ses
 
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
@@ -61,10 +62,14 @@ data AttachmentDb = AttachmentDb
   deriving (Show, Eq)
 
 data MessageBodyDb = 
-    UserBody { textUB :: !Text }
+    UserBody {
+      textUB :: !Text
+      , summaryUB :: !(Maybe Text)
+      }
   | AssistantBody { 
         responseUidAB :: !(Maybe Int64)
       , responseTextAB :: !(Maybe Text)
+      , summaryAB :: !(Maybe Text)
       }
   | SystemBody { 
         textSB :: !Text
@@ -138,6 +143,8 @@ data IndexDb = IndexDb
 
 data ContextDb = ContextDb
   { refCo :: !RefDb
+  , titleCo :: !Text
+  , convIdCo :: !Text
   , issuesCo :: !(Vector IssueDb)
   , messagesCo :: !(Vector MessageDb)
   , indexCo :: !IndexDb
@@ -167,27 +174,34 @@ loadDiscourse pool discourseUuid = do
     Right (Right ctx) -> Right ctx
 
 
+findDiscourseByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))
+findDiscourseByConvId pool convId = do
+  eiRezA <- Hp.use pool $ Ses.statement convId St.selectContextByConvId
+  case eiRezA of
+    Left err -> pure . Left $ show err
+    Right Nothing -> pure . Right $ Nothing
+    Right (Just (_, ctxUuid, _, _)) ->
+      pure . Right $ Just ctxUuid
+
+
 loadDiscourseTx :: UUID -> Tx.Transaction (Either String (Maybe ContextDb))
 loadDiscourseTx discourseUuid = do
   mCtx <- Tx.statement discourseUuid St.selectContextByUuid
   case mCtx of
     Nothing -> pure (Right Nothing)
-    Just (ctxUid, foundUuid) -> do
+    Just (ctxUid, foundUuid, title, convId) -> do
       is <- Tx.statement ctxUid St.selectIssues
       ms <- Tx.statement ctxUid St.selectMessages
       as <- Tx.statement ctxUid St.selectAttachments
+      sms <- Tx.statement ctxUid St.selectMessageSummaries
       sas <- Tx.statement ctxUid St.selectSubActions
       rfs <- Tx.statement ctxUid St.selectReflections
       rcs <- Tx.statement ctxUid St.selectReflectionChunks
       cds <- Tx.statement ctxUid St.selectCodes
       tcs <- Tx.statement ctxUid St.selectToolCalls
 
-      pure $
-        first ("buildContextDb: " <>) $
-          (
-            Just
-              <$> buildContextDb (ctxUid, foundUuid) is ms as sas rfs rcs cds tcs
-          )
+      pure $ first ("buildContextDb: " <>)
+              ( Just <$> buildContextDb (ctxUid, foundUuid, title, convId) is ms sms as sas rfs rcs cds tcs )
 
 
 -- -----------------------------
@@ -200,9 +214,10 @@ loadDiscourseTx discourseUuid = do
 -- -----------------------------
 
 buildContextDb
- :: (Int64, UUID)
+ :: (Int64, UUID, Text, Text)
   -> Vector (Int32, Text)
   -> Vector St.MessageRow
+  -> Vector St.MessageSummaryRow
   -> Vector St.AttachmentRow
   -> Vector St.SubActionRow
   -> Vector St.ReflectionRow
@@ -210,9 +225,12 @@ buildContextDb
   -> Vector St.CodeRow
   -> Vector St.ToolCallRow
   -> Either String ContextDb
-buildContextDb (ctxUid, ctxUuid) issuesV msgRowsV attRowsV saRowsV rfRowsV rfChunkRowsV codeRowsV toolRowsV = do
+buildContextDb (ctxUid, ctxUuid, title, convId) issuesV msgRowsV summariesRv attRowsV saRowsV relectionsRv rfChunkRowsV codeRowsV toolRowsV = do
   let
     issueObjs = V.map (uncurry IssueDb) issuesV
+
+    summaryByMessageUid :: Map Int64 Text
+    summaryByMessageUid = Mp.fromList (V.toList summariesRv)
 
   -- attachments by message uid
     attMap :: Map Int64 (Vector AttachmentDb)
@@ -224,14 +242,11 @@ buildContextDb (ctxUid, ctxUuid) issuesV msgRowsV attRowsV saRowsV rfRowsV rfChu
 
   -- reflection bodies by sub_action uid
     rfBodyBySa :: Map Int64 SubActionBodyDb
-    rfBodyBySa =
-        Mp.fromList $
-          map
-            (\(rfUid, saUid, summ, cont, fin) ->
+    rfBodyBySa = Mp.fromList $ map (\(rfUid, saUid, summ, cont, fin) ->
               let chunksV = Mp.findWithDefault V.empty rfUid chunkMap
               in (saUid, ReflectionBody summ cont chunksV fin)
             )
-            (V.toList rfRowsV)
+            (V.toList relectionsRv)
 
   -- code bodies by sub_action uid
     codeBodyBySa :: Map Int64 SubActionBodyDb
@@ -281,7 +296,7 @@ buildContextDb (ctxUid, ctxUuid) issuesV msgRowsV attRowsV saRowsV rfRowsV rfChu
   subActionsByMsg' <- traverse traverseEitherVec subActionsByMsg
 
   -- messages
-  msgs <- forM (V.toList msgRowsV) $ \row -> buildMessage attMap subActionsByMsg' row
+  msgs <- forM (V.toList msgRowsV) $ \row -> buildMessage summaryByMessageUid attMap subActionsByMsg' row
   let
     msgV = V.fromList msgs
     -- build indexes
@@ -289,6 +304,8 @@ buildContextDb (ctxUid, ctxUuid) issuesV msgRowsV attRowsV saRowsV rfRowsV rfChu
 
   pure $ ContextDb
       { refCo = RefDb ctxUid ctxUuid
+      , titleCo = title
+      , convIdCo = convId
       , issuesCo = issueObjs
       , messagesCo = msgV
       , indexCo = idx
@@ -296,15 +313,20 @@ buildContextDb (ctxUid, ctxUuid) issuesV msgRowsV attRowsV saRowsV rfRowsV rfChu
 
 
 -- Build one MessageDb from the joined row.
-buildMessage :: Map Int64 (Vector AttachmentDb) -> Map Int64 (Vector SubActionDb) -> St.MessageRow -> Either String MessageDb
-buildMessage attMap saMap (mUid, mUuid, s, kindTxt, cAt, uAt, userTxt, respUid, respTxt, sysTxt, toolTxt, unkTxt) = do
+buildMessage :: Map Int64 Text -> Map Int64 (Vector AttachmentDb) -> Map Int64 (Vector SubActionDb) -> St.MessageRow -> Either String MessageDb
+buildMessage summaryByMessageUid attMap saMap (mUid, mUuid, s, kindTxt, cAt, uAt, userTxt, respUid, respTxt, sysTxt, toolTxt, unkTxt) = do
   kind <- parseMessageKind kindTxt
+
+  let
+    mbSummary :: Maybe Text
+    mbSummary = Mp.lookup mUid summaryByMessageUid
+
   body <- case kind of
     UserMK ->
       case userTxt of
-        Just t -> Right (UserBody t)
+        Just t -> Right (UserBody t mbSummary)
         Nothing -> Left "user message missing user_message.text"
-    AssistantMK -> Right (AssistantBody respUid respTxt)
+    AssistantMK -> Right (AssistantBody respUid respTxt mbSummary)
     SystemMK -> maybe (Left "system message missing system_message.text") (Right . SystemBody) sysTxt
     ToolMK -> maybe (Left "tool message missing tool_message.text") (Right . ToolBody) toolTxt
     UnknownMK -> maybe (Left "unknown message missing unknown_message.text") (Right . UnknownBody) unkTxt
@@ -353,14 +375,14 @@ parseSubActionKind t = case T.toLower t of
 -- preserve stable ordering by folding.
 --
 groupVecByKey :: Ord k => Vector a -> (a -> (k, v)) -> Map k (Vector v)
-groupVecByKey xs f =
-  foldl'
-    (\m a ->
+groupVecByKey inVect f =
+  V.foldr'
+    (\a m ->
       let (k, v) = f a
       in Mp.insertWith (V.++) k (V.singleton v) m
     )
     Mp.empty
-    (V.toList xs)
+    inVect
 
 -- | The sub-action grouping above temporarily stores Either errors in the body.
 {-

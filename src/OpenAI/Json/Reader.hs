@@ -27,7 +27,7 @@ objectToMap anObject =
     Mp.mapKeys (T.pack . show) keyMap
 
 
-data Discussion = Discussion {
+data Conversation = Conversation {
   titleCv :: Text,
   createTimeCv :: Double,
   updateTimeCv :: Double,
@@ -35,9 +35,9 @@ data Discussion = Discussion {
   convIdCv :: Text
 } deriving (Show)
 
-instance FromJSON Discussion where
-  parseJSON = withObject "Discussion" $ \o ->
-    Discussion
+instance FromJSON Conversation where
+  parseJSON = withObject "Conversation" $ \o ->
+    Conversation
       <$> o .: "title"
       <*> o .: "create_time"
       <*> o .: "update_time"

@@ -45,8 +45,35 @@ data IngestOpts = IngestOpts
   } deriving stock (Show)
 
 
+data OaiSubCommand =
+  JsonSC OaiOpts
+  | SummarySC OaiSummaryOpts
+  | DocxSC OaiGenOpts
+  | ElmSC OaiGenOpts
+  | ProjFetchSC OaiProjFetchOpts
+  deriving stock (Show)
+
+
 data OaiOpts = OaiOpts {
   exportB :: !Bool
   , printB :: !Bool
   , jsonFile :: !FilePath
   } deriving stock (Show)
+
+newtype OaiSummaryOpts = OaiSummaryOpts {
+  targets :: [Text]
+}
+  deriving stock (Show)
+
+data OaiGenOpts = OaiGenOpts {
+  destPath :: FilePath
+  , targets :: [Text]
+}
+  deriving stock (Show)
+
+data OaiProjFetchOpts = OaiProjFetchOpts {
+  label :: Text
+  , sourcePath :: FilePath
+}
+  deriving stock (Show)
+

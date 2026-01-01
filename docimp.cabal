@@ -44,12 +44,16 @@ library
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
+      OpenAI.Elmify
       OpenAI.GenDocx
+      OpenAI.GenDocxDb
       OpenAI.InOperations
       OpenAI.Json.Reader
       OpenAI.Operations
       OpenAI.Parse
+      OpenAI.ProjFetcher
       OpenAI.Statements
+      OpenAI.Summarisation
       OpenAI.Types
       Options
       Options.Cli
@@ -93,6 +97,7 @@ library
     , pandoc-types
     , postgresql-binary
     , profunctors
+    , scalpel
     , scientific
     , text
     , time
@@ -145,6 +150,7 @@ executable docimp
     , pandoc-types
     , postgresql-binary
     , profunctors
+    , scalpel
     , scientific
     , text
     , time
@@ -198,6 +204,7 @@ test-suite docimp-test
     , pandoc-types
     , postgresql-binary
     , profunctors
+    , scalpel
     , scientific
     , text
     , time

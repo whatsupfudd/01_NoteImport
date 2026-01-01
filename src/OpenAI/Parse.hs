@@ -19,7 +19,7 @@ import qualified OpenAI.Json.Reader as Jd
 import OpenAI.Types
 
 
-showDiscussion :: Jd.Discussion -> (Text, [Text])
+showDiscussion :: Jd.Conversation -> (Text, [Text])
 showDiscussion discussion =
   case analyzeDiscussion discussion of
     Left err -> ("", [err])
@@ -33,7 +33,7 @@ showDiscussion discussion =
       -}
       (T.intercalate "\n" (map showMessage messages), fsmResult.issues)
 
-discussionToElm :: Jd.Discussion -> Either Text Text
+discussionToElm :: Jd.Conversation -> Either Text Text
 discussionToElm discussion =
   case analyzeDiscussion discussion of
     Left err -> Left err
@@ -45,7 +45,7 @@ discussionToElm discussion =
       Right $ "[\n  " <> T.intercalate "\n  , " (filter (not . T.null) elmStructs) <> "\n  ]"
 
 
-analyzeDiscussion :: Jd.Discussion -> Either Text Context
+analyzeDiscussion :: Jd.Conversation -> Either Text Context
 analyzeDiscussion discussion =
   let
     -- rootChild = Mp.lookup "client-created-root" discussion.mappingCv

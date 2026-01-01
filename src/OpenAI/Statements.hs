@@ -269,11 +269,13 @@ fetchAllDiscussions =
   |]
 
 --- Discussion Context serialisation:
-insertContext :: Statement () (Int64, UUID)
+insertContext :: Statement (Text, Text) (Int64, UUID)
 insertContext =
   [TH.singletonStatement|
     insert into oai.discourse
-    default values
+      (title, conversation_eid)
+    values
+      ($1 :: text, $2 :: text)
     returning uid :: int8, uuid :: uuid
   |]
 
@@ -393,15 +395,31 @@ insertToolCall =
 
 
 -- Deserialisation of Discourses:
-selectContextByUuid :: Statement UUID (Maybe (Int64, UUID))
+selectContextByUuid :: Statement UUID (Maybe (Int64, UUID, Text, Text))
 selectContextByUuid =
   [TH.maybeStatement|
     select
-      uid :: int8,
-      uuid :: uuid
+      uid :: int8
+      , uuid :: uuid
+      , title :: text
+      , conversation_eid :: text
     from oai.discourse
     where uuid = $1 :: uuid
   |]
+
+
+selectContextByConvId :: Statement Text (Maybe (Int64, UUID, Text, Text))
+selectContextByConvId =
+  [TH.maybeStatement|
+    select
+      uid :: int8
+      , uuid :: uuid
+      , title :: text
+      , conversation_eid :: text
+    from oai.discourse
+    where conversation_eid = $1 :: text
+  |]
+
 
 selectIssues :: Statement Int64 (Vector (Int32, Text))
 selectIssues =
@@ -471,6 +489,22 @@ selectAttachments =
       join oai.messagefsm m on m.uid = a.message_fk
     where m.discourse_fk = $1 :: int8
     order by m.seq, a.seq
+  |]
+
+
+type MessageSummaryRow = (Int64, Text)
+-- (message_fk, content)
+
+selectMessageSummaries :: Statement Int64 (Vector MessageSummaryRow)
+selectMessageSummaries =
+  [TH.vectorStatement|
+    select
+      ms.message_fk :: int8,
+      ms.content :: text
+    from oai.message_summary ms
+      join oai.messagefsm m on m.uid = ms.message_fk
+    where m.discourse_fk = $1 :: int8
+    order by m.seq
   |]
 
 -- uid, uuid, message_fk, seq, kind, text?

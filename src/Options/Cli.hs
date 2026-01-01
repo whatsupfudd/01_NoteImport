@@ -32,7 +32,7 @@ data Command =
   | NotionCmd Text
   | DocXCmd DocXOpts    -- v1 parsing.
   | IngestCmd IngestOpts
-  | OaiJsonCmd OaiOpts
+  | OaiCmd OaiSubCommand
   deriving stock (Show)
 
 {- HERE: Additional structures for holding new command parameters:
@@ -105,7 +105,7 @@ commandDefs =
       , ("notion", notionOpts, "Notion command.")
       , ("docx", DocXCmd <$> docxOpts, "DocX command.")
       , ("ingest", IngestCmd <$> ingestOpts, "Ingest command.")
-      , ("oai", OaiJsonCmd <$> oaiJsonOpts, "OpenAI JSON command.")
+      , ("oai", oaiSubCommands, "OpenAI JSON command.")
       ]
     headArray = head cmdArray
     tailArray = tail cmdArray
@@ -206,9 +206,38 @@ ingestOpts =
           "pretty" -> Right OutPretty
           other    -> Left $ "Unknown out mode: " <> other
 
+
+oaiSubCommands :: Parser Command
+oaiSubCommands =
+  OaiCmd <$> subparser (
+    command "json" (info (JsonSC <$> oaiJsonOpts) (progDesc "OpenAI JSON command."))
+    <> command "docx" (info (DocxSC <$> oaiGenOpts) (progDesc "OpenAI DOCX command."))
+    <> command "summary" (info (SummarySC <$> oaiSummaryOpts) (progDesc "OpenAI Summary command."))
+    <> command "elm" (info (ElmSC <$> oaiGenOpts) (progDesc "OpenAI Elm command."))
+    <> command "project" (info (ProjFetchSC <$> oaiProjFetchOpts) (progDesc "OpenAI Project Fetch command."))
+  )
+
+
 oaiJsonOpts :: Parser OaiOpts
 oaiJsonOpts =
   OaiOpts <$>
     switch (long "export" <> short 'e' <> help "Comes from the OpenAI export service." <> showDefault)
     <*> switch (long "print" <> short 'p' <> help "Print the discussions to the console instead of saving to the database." <> showDefault)
     <*> strArgument (metavar "JSONFILE" <> help "JSON file file path")
+
+oaiSummaryOpts :: Parser OaiSummaryOpts
+oaiSummaryOpts =
+  OaiSummaryOpts <$>
+    some (strOption (long "target" <> short 't' <> help "A target to summarize." <> metavar "TARGET"))
+
+oaiGenOpts :: Parser OaiGenOpts
+oaiGenOpts =
+  OaiGenOpts <$>
+    strArgument (help "Destination directory." <> metavar "DESTDIR")
+    <*> some (strOption (long "target" <> short 't' <> help "A target to elmify." <> metavar "TARGET"))
+
+oaiProjFetchOpts :: Parser OaiProjFetchOpts
+oaiProjFetchOpts =
+  OaiProjFetchOpts <$>
+    strOption (long "label" <> short 'l' <> help "The label of the project to fetch." <> metavar "LABEL")
+    <*> strArgument (help "Source file path." <> metavar "SOURCEPATH")

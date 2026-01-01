@@ -326,6 +326,11 @@ CREATE TABLE IF NOT EXISTS message_attachment (
   CONSTRAINT message_attachment_message_seq_uniq UNIQUE (message_fk, seq)
 );
 
+create table if not exists message_summary (
+  message_fk BIGINT PRIMARY KEY REFERENCES messagefsm(uid),
+  content TEXT NOT NULL
+);
+
 -- -----------------------------
 -- Per-kind payload tables
 -- -----------------------------
@@ -514,3 +519,28 @@ CREATE INDEX IF NOT EXISTS sub_action_message_fk_idx ON sub_action (message_fk);
 CREATE INDEX IF NOT EXISTS sub_action_kind_idx       ON sub_action (kind);
 
 CREATE INDEX IF NOT EXISTS assistant_response_fk_idx ON assistant_message (response_fk);
+
+
+--- 
+-- Discussion Groups
+-- -----------------------------
+
+CREATE TABLE IF NOT EXISTS discourse_group (
+  uid BIGSERIAL PRIMARY KEY
+  , parent_fk BIGINT REFERENCES discourse_group(uid) ON DELETE CASCADE
+  , uuid UUID NOT NULL DEFAULT gen_random_uuid()
+  , label TEXT NOT NULL UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS discourse_group_parent_fk_idx ON discourse_group (parent_fk);
+CREATE INDEX IF NOT EXISTS discourse_group_uuid_idx ON discourse_group (uuid);
+
+create table if not exists discourse_group_member (
+  discourse_group_fk BIGINT NOT NULL REFERENCES discourse_group(uid) ON DELETE CASCADE,
+  discussions_fk BIGINT NOT NULL REFERENCES discussions(uid) ON DELETE CASCADE
+  , lastUse date
+  PRIMARY KEY (discourse_group_fk, discussions_fk)
+);
+
+create index if not exists discourse_group_member_dgroup_fk_idx on discourse_group_member (discourse_group_fk);
+create index if not exists discourse_group_member_discourse_fk_idx on discourse_group_member (discussions_fk);

@@ -33,7 +33,7 @@ runWithOptions cliOptions fileOptions = do
             Opt.NotionCmd aWordspace -> Cmd.notionCmd aWordspace
             Opt.DocXCmd aDocXOpts -> Cmd.loadDoc aDocXOpts
             Opt.IngestCmd aIngestOpts -> Cmd.runIngest aIngestOpts
-            Opt.OaiJsonCmd args -> Cmd.parseCmd args
+            Opt.OaiCmd args -> Cmd.oaiCmd args
       rtOptions <- Opt.mergeOptions cliOptions fileOptions envOptions
       result <- cmdExecutor rtOptions
       -- TODO: return a properly kind of conclusion.

@@ -34,7 +34,7 @@ import OpenAI.Types
 import OpenAI.Parse (analyzeDiscussion, findRootNode)
 import Data.List (find)
 
-addDiscussionSession :: Discussion -> Tx.Transaction Int64
+addDiscussionSession :: Conversation -> Tx.Transaction Int64
 addDiscussionSession disc = Tx.statement (disc.titleCv, disc.convIdCv, disc.createTimeCv, disc.updateTimeCv) St.insertDiscussionStmt
 
 addNodeSession :: Int64 -> Maybe Int64 -> Text -> Node -> Tx.Transaction Int64
@@ -148,7 +148,7 @@ useTx :: Hp.Pool -> Tx.Transaction tr -> IO (Either Hp.UsageError tr)
 useTx pool stmts = Hp.use pool (Tx.transaction Tx.ReadCommitted Tx.Write stmts)   -- 
 
 
-addDiscussion :: Hp.Pool -> Discussion -> IO (Either Hp.UsageError (Either String Int64))
+addDiscussion :: Hp.Pool -> Conversation -> IO (Either Hp.UsageError (Either String Int64))
 addDiscussion pool discussion = do
   -- liftIO $ putStrLn $ "@[addDiscussion] adding discussion: " <> show discussion.titleCv
   useTx pool $ do
@@ -279,11 +279,11 @@ fetchAllDiscussions pool = do
 --
 -- Returns the (context_uid, context_uuid) on success.
 -- Any failure rolls back the entire insert.
-storeDiscussion :: Hp.Pool -> Context -> IO (Either String (Int64, UUID))
-storeDiscussion pool ctx = do
+storeDiscussion :: Hp.Pool -> Text -> Text -> Context -> IO (Either String (Int64, UUID))
+storeDiscussion pool title convId ctx = do
   r <- Hp.use pool $
     Tx.transaction Tx.ReadCommitted Tx.Write $ do
-      (ctxUid, ctxUuid) <- Tx.statement () St.insertContext
+      (ctxUid, ctxUuid) <- Tx.statement (title, convId) St.insertContext
 
       -- issues :: [Text]
       forM_ (zip [1 :: Int32 ..] ctx.issues) $ \(i, t) ->
