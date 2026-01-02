@@ -46,28 +46,35 @@ data IngestOpts = IngestOpts
 
 
 data OaiSubCommand =
-  JsonSC OaiOpts
-  | SummarySC OaiSummaryOpts
+  JsonSC JsonSubCommand
+  | SummarySC TargetsOpts
   | DocxSC OaiGenOpts
   | ElmSC OaiGenOpts
   | ProjFetchSC OaiProjFetchOpts
+  | ConversationSC ConversationSubCommand
   deriving stock (Show)
 
 
-data OaiOpts = OaiOpts {
+data JsonSubCommand =
+  PrintJS OaiJsonOpts TargetsOpts
+  | StoreJS OaiJsonOpts TargetsOpts
+  deriving stock (Show)
+
+data OaiJsonOpts = OaiJsonOpts {
   exportB :: !Bool
-  , printB :: !Bool
   , jsonFile :: !FilePath
   } deriving stock (Show)
 
-newtype OaiSummaryOpts = OaiSummaryOpts {
-  targets :: [Text]
-}
+data TargetsOpts = TargetsOpts {
+    targetsTO :: [Text]
+    , groupTO :: Maybe Text
+  }
   deriving stock (Show)
 
 data OaiGenOpts = OaiGenOpts {
   destPath :: FilePath
   , targets :: [Text]
+  , group :: Maybe Text
 }
   deriving stock (Show)
 
@@ -77,3 +84,9 @@ data OaiProjFetchOpts = OaiProjFetchOpts {
 }
   deriving stock (Show)
 
+
+data ConversationSubCommand =
+  DeserializeCS OaiGenOpts
+  | ConvertCS TargetsOpts
+  | DocxCS OaiGenOpts
+  deriving stock (Show)

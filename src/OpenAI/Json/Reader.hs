@@ -276,6 +276,39 @@ instance FromJSON AudioAssetPointer where
     <*> o .: "metadata"
 
 
+data ImageMetadata = ImageMetadata {
+  dalleMd :: Maybe Dalle,
+  gizmoMd :: Maybe Value,
+  generationMd :: Maybe Generation,
+  containerPixelHeightMd :: Maybe Int,
+  containerPixelWidthMd :: Maybe Int,
+  emuOmitGlimpseImageMd :: Maybe Value,
+  emuPatchesOverrideMd :: Maybe Value,
+  lpeKeepPatchIjhwMd :: Maybe Value,
+  lpeDeltaEncodingChannelMd :: Maybe Value,
+  sanitizedMd :: Bool,
+  assetPointerLinkMd :: Maybe Value,
+  watermarkedAssetPointerMd :: Maybe Value,
+  isNoAuthPlaceholderMd :: Maybe Value
+} deriving (Show, Generic)
+
+instance FromJSON ImageMetadata where
+  parseJSON = withObject "Metadata" $ \o -> ImageMetadata
+    <$> o .:? "dalle"
+    <*> o .:? "gizmo"
+    <*> o .:? "generation"
+    <*> o .: "container_pixel_height"
+    <*> o .: "container_pixel_width"
+    <*> o .:? "emu_omit_glimpse_image"
+    <*> o .:? "emu_patches_override"
+    <*> o .:? "lpe_keep_patch_ijhw"
+    <*> o .:? "lpe_delta_encoding_channel"
+    <*> o .: "sanitized"
+    <*> o .:? "asset_pointer_link"
+    <*> o .:? "watermarked_asset_pointer"
+    <*> o .:? "is_no_auth_placeholder"
+
+
 data Dalle = Dalle {
   genIdDa :: Maybe Text,
   promptDa :: Text,
@@ -319,38 +352,6 @@ instance FromJSON Generation where
     <*> o .: "serialization_title"
     <*> o .:? "orientation"
 
-
-data ImageMetadata = ImageMetadata {
-  dalleMd :: Maybe Dalle,
-  gizmoMd :: Maybe Value,
-  generationMd :: Maybe Generation,
-  containerPixelHeightMd :: Maybe Int,
-  containerPixelWidthMd :: Maybe Int,
-  emuOmitGlimpseImageMd :: Maybe Value,
-  emuPatchesOverrideMd :: Maybe Value,
-  lpeKeepPatchIjhwMd :: Maybe Value,
-  lpeDeltaEncodingChannelMd :: Maybe Value,
-  sanitizedMd :: Bool,
-  assetPointerLinkMd :: Maybe Value,
-  watermarkedAssetPointerMd :: Maybe Value,
-  isNoAuthPlaceholderMd :: Maybe Value
-} deriving (Show, Generic)
-
-instance FromJSON ImageMetadata where
-  parseJSON = withObject "Metadata" $ \o -> ImageMetadata
-    <$> o .:? "dalle"
-    <*> o .:? "gizmo"
-    <*> o .:? "generation"
-    <*> o .: "container_pixel_height"
-    <*> o .: "container_pixel_width"
-    <*> o .:? "emu_omit_glimpse_image"
-    <*> o .:? "emu_patches_override"
-    <*> o .:? "lpe_keep_patch_ijhw"
-    <*> o .:? "lpe_delta_encoding_channel"
-    <*> o .: "sanitized"
-    <*> o .:? "asset_pointer_link"
-    <*> o .:? "watermarked_asset_pointer"
-    <*> o .:? "is_no_auth_placeholder"
 
 
 data AudioMetadata = AudioMetadata {

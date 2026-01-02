@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Statements where
+module OpenAI.Serialize.Statements where
 
 import Data.Text (Text)
 import Data.Int (Int32, Int64)
@@ -13,10 +13,11 @@ import qualified Data.Aeson as Ae
 import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 
-insertDiscussionStmt :: Statement (Text, Text,Double, Double) Int64
-insertDiscussionStmt =
+
+insertConversation :: Statement (Text, Text,Double, Double) Int64
+insertConversation =
   [TH.singletonStatement|
-    insert into oai.discussions
+    insert into oai.conversations
       (title, eid, create_time, update_time)
     values
       ($1 :: text, $2 :: text, $3 :: float8, $4 :: float8)
@@ -28,7 +29,7 @@ insertNodeStmt :: Statement (Int64, Text, Maybe Int64) Int64
 insertNodeStmt =
   [TH.singletonStatement|
     insert into oai.nodes
-      (discussion_fk, eid, parent_fk)
+      (conversation_fk, eid, parent_fk)
     values
       ($1 :: int8, $2 :: text, $3 :: int8?)
     returning uid :: int8
@@ -191,29 +192,40 @@ insertImageAssetPointerMMPartStmt =
   |]
 
 
-insertImageMetadataStmt :: Statement (Maybe Int64, Maybe Ae.Value, Maybe Int64, Maybe Int32, Maybe Int32, Maybe Ae.Value
-              , Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value, Bool, Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value) ()
+insertImageMetadataStmt :: Statement (Int64, Maybe Ae.Value, Maybe Int32, Maybe Int32, Maybe Ae.Value
+              , Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value, Bool, Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value) Int64
 insertImageMetadataStmt =
-  [TH.resultlessStatement|
-    insert into oai.metadatas_imgasset (dalle_fk, gizmo, generation_fk, container_pixel_height, container_pixel_width, emu_omit_glimpse_image, emu_patches_override, lpe_keep_patch_ijhw, lpe_delta_encoding_channel, sanitized, asset_pointer_link, watermarked_asset_pointer, is_no_auth_placeholder)
-    values ($1 :: int8?, $2 :: jsonb?, $3 :: int8?, $4 :: int4?, $5 :: int4?, $6 :: jsonb?, $7 :: jsonb?, $8 :: jsonb?, $9 :: jsonb?, $10 :: bool, $11 :: jsonb?, $12 :: jsonb?, $13 :: jsonb?)
+  [TH.singletonStatement|
+    insert into oai.metadatas_imgasset
+      (imgptr_fk, gizmo, container_pixel_height, container_pixel_width, emu_omit_glimpse_image
+        , emu_patches_override, lpe_keep_patch_ijhw, lpe_delta_encoding_channel, sanitized
+        , asset_pointer_link, watermarked_asset_pointer, is_no_auth_placeholder)
+    values
+      ($1 :: int8, $2 :: jsonb?, $3 :: int4?, $4 :: int4?, $5 :: jsonb?
+        , $6 :: jsonb?, $7 :: jsonb?, $8 :: jsonb?, $9 :: bool
+        , $10 :: jsonb?, $11 :: jsonb?, $12 :: jsonb?)
+    returning uid :: int8
   |]
 
 
-insertDalleStmt :: Statement (Maybe Text, Text, Maybe Int64, Maybe Text, Maybe Text, Text) Int64
+insertDalleStmt :: Statement (Int64, Maybe Text, Text, Maybe Int64, Maybe Text, Maybe Text, Text) ()
 insertDalleStmt =
-  [TH.singletonStatement|
-    insert into oai.dalles (gen_id, prompt, seed, parent_gen_id, edit_op, serialization_title)
-    values ($1 :: text?, $2 :: text, $3 :: int8?, $4 :: text?, $5 :: text?, $6 :: text)
-    returning uid :: int8
+  [TH.resultlessStatement|
+    insert into oai.dalles
+      (metadata_fk, gen_id, prompt, seed, parent_gen_id, edit_op, serialization_title)
+    values
+      ($1 :: int8, $2 :: text?, $3 :: text, $4 :: int8?, $5 :: text?, $6 :: text?, $7 :: text)
   |]
 
-insertGenerationStmt :: Statement (Maybe Text, Text, Maybe Int64, Maybe Text, Int32, Int32, Bool, Text, Maybe Text) Int64
+insertGenerationStmt :: Statement (Int64,Maybe Text, Text, Maybe Int64, Maybe Text, Int32, Int32, Bool, Text, Maybe Text) ()
 insertGenerationStmt =
-  [TH.singletonStatement|
-    insert into oai.generations (gen_id, gen_size, seed, parent_gen_id, height, width, transparent_background, serialization_title, orientation)
-    values ($1 :: text?, $2 :: text, $3 :: int8?, $4 :: text?, $5 :: int4, $6 :: int4, $7 :: bool, $8 :: text, $9 :: text?)
-    returning uid :: int8
+  [TH.resultlessStatement|
+    insert into oai.generations
+      (metadata_fk, gen_id, gen_size, seed, parent_gen_id, height, width
+        , transparent_background, serialization_title, orientation)
+    values
+      ($1 :: int8, $2 :: text?, $3 :: text, $4 :: int8?, $5 :: text?, $6 :: int4, $7 :: int4
+        , $8 :: bool, $9 :: text, $10 :: text?)
   |]
 
 insertAudioTranscriptionMMPartStmt :: Statement (Int64, Text, Text, Maybe Text) ()
@@ -234,22 +246,22 @@ insertAudioAssetPointerMMPartStmt =
     returning uid :: int8
   |]
 
-insertAudioMetadataStmt :: Statement (Int64
+insertAudioMetadataStmt :: Statement (Int64, Int32
     , Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value
     , Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value
     , Maybe Ae.Value, Double, Double) ()
 insertAudioMetadataStmt =
   [TH.resultlessStatement|
     insert into oai.metadatas_audioasset
-      (assetptr_fk
+      (assetptr_fk, part_kind
         , start_timestamp, end_timestamp, pretokenized_vq
         , interruptions, original_audio_source, transcription
         , word_transcription, start_stamp, end_stamp)
     values
-      ($1 :: int8
-      , $2 :: jsonb?, $3 :: jsonb?, $4 :: jsonb?
-      , $5 :: jsonb?, $6 :: jsonb?, $7 :: jsonb?
-      , $8 :: jsonb?, $9 :: float8, $10 :: float8)
+      ($1 :: int8, $2 :: int4
+      , $3 :: jsonb?, $4 :: jsonb?, $5 :: jsonb?
+      , $6 :: jsonb?, $7 :: jsonb?, $8 :: jsonb?
+      , $9 :: jsonb?, $10 :: float8, $11 :: float8)
   |]
 
 insertRealTimeUserAVMMPartStmt :: Statement (Int64, Maybe Ae.Value, Maybe Ae.Value, Maybe Ae.Value, Maybe Double) Int64
@@ -261,12 +273,6 @@ insertRealTimeUserAVMMPartStmt =
     returning uid :: int8
   |]
 
-
-fetchAllDiscussions :: Statement () (Vector (Int64, Text) )
-fetchAllDiscussions =
-  [TH.vectorStatement|
-    select uid::int8, title::text from oai.discussions
-  |]
 
 --- Discussion Context serialisation:
 insertContext :: Statement (Text, Text) (Int64, UUID)
@@ -392,209 +398,3 @@ insertToolCall =
     insert into oai.tool_call (sub_action_fk, tool_name, tool_input)
     values ($1 :: int8, $2 :: text, $3 :: text)
   |]
-
-
--- Deserialisation of Discourses:
-selectContextByUuid :: Statement UUID (Maybe (Int64, UUID, Text, Text))
-selectContextByUuid =
-  [TH.maybeStatement|
-    select
-      uid :: int8
-      , uuid :: uuid
-      , title :: text
-      , conversation_eid :: text
-    from oai.discourse
-    where uuid = $1 :: uuid
-  |]
-
-
-selectContextByConvId :: Statement Text (Maybe (Int64, UUID, Text, Text))
-selectContextByConvId =
-  [TH.maybeStatement|
-    select
-      uid :: int8
-      , uuid :: uuid
-      , title :: text
-      , conversation_eid :: text
-    from oai.discourse
-    where conversation_eid = $1 :: text
-  |]
-
-
-selectIssues :: Statement Int64 (Vector (Int32, Text))
-selectIssues =
-  [TH.vectorStatement|
-    select
-      seq :: int4,
-      text :: text
-    from oai.discourse_issue
-    where discourse_fk = $1 :: int8
-    order by seq
-  |]
-
--- One row per message with all possible payloads left-joined.
-type MessageRow =
-  ( Int64 -- message uid
-  , UUID  -- message uuid
-  , Int32 -- seq
-  , Text  -- kind as text
-  , Maybe UTCTime -- created_at
-  , Maybe UTCTime -- updated_at
-  , Maybe Text    -- user_message.text
-  , Maybe Int64   -- assistant_message.response_fk
-  , Maybe Text    -- response_ast.text
-  , Maybe Text    -- system_message.text
-  , Maybe Text    -- tool_message.text
-  , Maybe Text    -- unknown_message.text
-  )
-
-selectMessages :: Statement Int64 (Vector MessageRow)
-selectMessages =
-  [TH.vectorStatement|
-    select
-      m.uid :: int8,
-      m.uuid :: uuid,
-      m.seq :: int4,
-      (m.kind::text) :: text,
-      m.created_at :: timestamptz?,
-      m.updated_at :: timestamptz?,
-      um.text :: text?,
-      am.response_fk :: int8?,
-      ra.text :: text?,
-      sm.text :: text?,
-      tm.text :: text?,
-      un.text :: text?
-    from oai.messagefsm m
-      left join oai.user_message um on um.message_fk = m.uid
-      left join oai.assistant_message am on am.message_fk = m.uid
-      left join oai.response_ast ra on ra.uid = am.response_fk
-      left join oai.system_message sm on sm.message_fk = m.uid
-      left join oai.tool_message tm on tm.message_fk = m.uid
-      left join oai.unknown_message un on un.message_fk = m.uid
-    where m.discourse_fk = $1 :: int8
-    order by m.seq
-  |]
-
--- message_fk, seq, value (ordered by parent message.seq)
-type AttachmentRow = (Int64, Int32, Text)
-
-selectAttachments :: Statement Int64 (Vector AttachmentRow)
-selectAttachments =
-  [TH.vectorStatement|
-    select
-      a.message_fk :: int8,
-      a.seq :: int4,
-      a.value :: text
-    from oai.message_attachment a
-      join oai.messagefsm m on m.uid = a.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq, a.seq
-  |]
-
-
-type MessageSummaryRow = (Int64, Text)
--- (message_fk, content)
-
-selectMessageSummaries :: Statement Int64 (Vector MessageSummaryRow)
-selectMessageSummaries =
-  [TH.vectorStatement|
-    select
-      ms.message_fk :: int8,
-      ms.content :: text
-    from oai.message_summary ms
-      join oai.messagefsm m on m.uid = ms.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq
-  |]
-
--- uid, uuid, message_fk, seq, kind, text?
-type SubActionRow = (Int64, UUID, Int64, Int32, Text, Maybe Text)
-
-selectSubActions :: Statement Int64 (Vector SubActionRow)
-selectSubActions =
-  [TH.vectorStatement|
-    select
-      sa.uid :: int8,
-      sa.uuid :: uuid,
-      sa.message_fk :: int8,
-      sa.seq :: int4,
-      (sa.kind::text) :: text,
-      sa.text :: text?
-    from oai.sub_action sa
-      join oai.messagefsm m on m.uid = sa.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq, sa.seq
-  |]
-
--- reflection uid, sub_action_fk, summary, content, finished?
-type ReflectionRow = (Int64, Int64, Text, Text, Maybe Bool)
-
-selectReflections :: Statement Int64 (Vector ReflectionRow)
-selectReflections =
-  [TH.vectorStatement|
-    select
-      r.uid :: int8,
-      r.sub_action_fk :: int8,
-      r.summary :: text,
-      r.content :: text,
-      r.finished :: bool?
-    from oai.reflection r
-      join oai.sub_action sa on sa.uid = r.sub_action_fk
-      join oai.messagefsm m on m.uid = sa.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq, sa.seq
-  |]
-
--- reflection_fk, seq, text
-type ReflectionChunkRow = (Int64, Int32, Text)
-
-selectReflectionChunks :: Statement Int64 (Vector ReflectionChunkRow)
-selectReflectionChunks =
-  [TH.vectorStatement|
-    select
-      c.reflection_fk :: int8,
-      c.seq :: int4,
-      c.text :: text
-    from oai.reflection_chunk c
-      join oai.reflection r on r.uid = c.reflection_fk
-      join oai.sub_action sa on sa.uid = r.sub_action_fk
-      join oai.messagefsm m on m.uid = sa.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq, sa.seq, c.seq
-  |]
-
--- sub_action_fk, language, format_name?, text
-type CodeRow = (Int64, Text, Maybe Text, Text)
-
-selectCodes :: Statement Int64 (Vector CodeRow)
-selectCodes =
-  [TH.vectorStatement|
-    select
-      c.sub_action_fk :: int8,
-      c.language :: text,
-      c.format_name :: text?,
-      c.text :: text
-    from oai.code c
-      join oai.sub_action sa on sa.uid = c.sub_action_fk
-      join oai.messagefsm m on m.uid = sa.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq, sa.seq
-  |]
-
--- sub_action_fk, tool_name, tool_input
-type ToolCallRow = (Int64, Text, Text)
-
-selectToolCalls :: Statement Int64 (Vector ToolCallRow)
-selectToolCalls =
-  [TH.vectorStatement|
-    select
-      t.sub_action_fk :: int8,
-      t.tool_name :: text,
-      t.tool_input :: text
-    from oai.tool_call t
-      join oai.sub_action sa on sa.uid = t.sub_action_fk
-      join oai.messagefsm m on m.uid = sa.message_fk
-    where m.discourse_fk = $1 :: int8
-    order by m.seq, sa.seq
-  |]
-

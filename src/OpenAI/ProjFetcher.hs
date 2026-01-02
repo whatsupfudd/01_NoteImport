@@ -1,5 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
-module OpenAI.ProjFetcher ( DiscussionDescription(..), fetchProjects, saveDescriptionsToGroup ) 
+module OpenAI.ProjFetcher ( DiscussionDescription(..), saveProjects, saveDescriptionsToGroup ) 
   where
 
 import Control.Applicative (Alternative, (<|>))
@@ -14,6 +14,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Time as Dt
 import qualified Data.Text as T
+import qualified Data.Vector as V
 
 import GHC.Generics (Generic)
 import GHC.IO (unsafePerformIO)
@@ -29,6 +30,13 @@ import qualified Hasql.Transaction.Sessions as TxS
 
 
 -- | Data structure to hold extracted project information
+data ConversationDesc = ConversationDesc {
+    uid :: Int64
+  , title :: Text
+  , eid :: Text
+  }
+  deriving Show
+
 data DiscussionDescription = DiscussionDescription {
       title :: Text
     , summary :: Text
@@ -43,10 +51,8 @@ instance Show DiscussionDescription where
 
 -- | Top-level function requested by the CTO.
 -- Reads a file at the given FilePath and extracts a list of DiscussionDescriptions.
-fetchProjects :: FilePath -> IO [DiscussionDescription]
-fetchProjects path = do
-    -- We read the file as a String for Scalpel's scrapeStringLike.
-    -- Scalpel handles partial HTML (like a lone <section>) gracefully.
+saveProjects :: FilePath -> IO [DiscussionDescription]
+saveProjects path = do
     content <- readFile path
     let
       projects = scrapeStringLike content projectListScraper
@@ -94,22 +100,20 @@ projectScraper = do
 --   * Right () on success
 --   * Left err on any failure (transaction rolled back)
 --
-saveDescriptionsToGroup :: Text -> [DiscussionDescription] -> Hp.Pool -> IO (Either String ())
+saveDescriptionsToGroup :: Text -> [DiscussionDescription] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [()]))
 saveDescriptionsToGroup groupLabel descs pool = do
-  rez <- Hp.use pool $ TxS.transaction TxS.ReadCommitted TxS.Write (saveTx groupLabel descs)
-  case rez of
-    Left dbErr -> pure . Left $ "@[saveDescriptionsToGroup] database error: " <> show dbErr
-    Right eiOpRez -> case eiOpRez of
-      Left opErr -> pure . Left $ "@[saveDescriptionsToGroup] operation err: " <> opErr
-      Right () -> pure . Right $ ()
+  rezA <- Hp.use pool $ TxS.transaction TxS.ReadCommitted TxS.Write (saveTx groupLabel descs)
+  case rezA of
+    Left dbErr -> pure . Left $ [ dbErr ]
+    Right eiOpRez -> pure . Right $ eiOpRez
 
 
-saveTx :: Text -> [DiscussionDescription] -> Tx.Transaction (Either String ())
+saveTx :: Text -> [DiscussionDescription] -> Tx.Transaction (Either [String] [()])
 saveTx groupLabel descs = do
   groupUid <- Tx.statement groupLabel upsertDiscourseGroup
 
   rezIns <- forM descs $ \d -> do
-    mbDiscourseUid <- Tx.statement d.eid findDiscourseByEid
+    mbDiscourseUid <- Tx.statement d.eid findConversationByEid
     case mbDiscourseUid of
       Nothing ->
         pure . Left $ "@[saveTx]discourse not found for eid: " <> show d.eid
@@ -117,8 +121,29 @@ saveTx groupLabel descs = do
         Tx.statement (groupUid, discourseUid, d.lastUse) insertGroupMember
         pure . Right $ ()
   case lefts rezIns of
-    [] -> pure . Right $ ()
-    errs -> pure . Left $ unlines errs
+    [] -> pure . Right $ [ () ]
+    errs -> pure . Left $ errs
+
+-- Fetchers:
+fetchDiscoursesInGroup :: Text -> Hp.Pool -> IO (Either Hp.UsageError (V.Vector ConversationDesc))
+fetchDiscoursesInGroup groupLabel pool = do
+  rezA <- Hp.use pool $ Ses.statement groupLabel findDiscourseGroupByLabel
+  case rezA of
+    Left ue -> pure . Left $ ue
+    Right Nothing -> pure . Right $ V.empty
+    Right (Just (groupID, _, _)) -> do
+      rez <- Hp.use pool $ Ses.statement groupID findConversationByGroupId
+      case rez of
+        Left uerr -> pure . Left $ uerr
+        Right rawConvs -> pure . Right $ V.map (\(uid, title, eid) -> ConversationDesc uid title eid) rawConvs
+
+
+findDiscourseGroupByLabel :: Statement Text (Maybe (Int64, Text, Text))
+findDiscourseGroupByLabel =
+  [TH.maybeStatement|
+    select uid :: int8, title::text, eid::text
+    from oai.discourse_group where label = $1 :: text
+  |]
 
 
 -- -----------------------------
@@ -140,11 +165,22 @@ upsertDiscourseGroup =
 
 
 -- | Find a discourse by eid.
-findDiscourseByEid :: Statement Text (Maybe Int64)
-findDiscourseByEid =
+findConversationByEid :: Statement Text (Maybe Int64)
+findConversationByEid =
   [TH.maybeStatement|
     select uid :: int8
     from oai.discussions where eid = $1 :: text
+  |]
+
+
+findConversationByGroupId :: Statement Int64 (V.Vector (Int64, Text, Text))
+findConversationByGroupId =
+  [TH.vectorStatement|
+    select b.uid :: int8, b.title :: text, b.eid :: text
+    from oai.discourse_group_member a
+      join oai.discussions b on b.discussions_fk = a.uid
+    where
+      discourse_group_fk = $1 :: int8
   |]
 
 

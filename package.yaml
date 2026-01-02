@@ -71,6 +71,8 @@ dependencies:
   - data-default
   # For HTML scraping:
   - scalpel
+  # For transformer monads (ExceptT, runExceptT, ...):
+  - transformers
 
 
 default-extensions:

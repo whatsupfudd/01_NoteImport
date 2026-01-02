@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use for_" #-}
 {-# HLINT ignore "Use forM_" #-}
-module OpenAI.Operations where
+module OpenAI.Serialize.Conversation where
 
 import Control.Monad (when, forM_, forM, void)
 import Control.Monad.IO.Class (liftIO)
@@ -25,7 +25,7 @@ import qualified Data.Aeson as Ae
 
 import qualified Hasql.Pool as Hp
 import qualified Hasql.Session as Ses
-import qualified OpenAI.Statements as St
+import qualified OpenAI.Serialize.Statements as St
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Tx
 
@@ -34,8 +34,30 @@ import OpenAI.Types
 import OpenAI.Parse (analyzeDiscussion, findRootNode)
 import Data.List (find)
 
-addDiscussionSession :: Conversation -> Tx.Transaction Int64
-addDiscussionSession disc = Tx.statement (disc.titleCv, disc.convIdCv, disc.createTimeCv, disc.updateTimeCv) St.insertDiscussionStmt
+-- | useTx: helper to wrap a statement into a transaction.
+useTx :: Hp.Pool -> Tx.Transaction tr -> IO (Either Hp.UsageError tr)
+useTx pool stmts = Hp.use pool (Tx.transaction Tx.ReadCommitted Tx.Write stmts)   -- 
+
+addConversation :: Hp.Pool -> Conversation -> IO (Either Hp.UsageError (Either String Int64))
+addConversation pool conversation = do
+  -- liftIO $ putStrLn $ "@[addConversation] adding conversation: " <> show conversation.titleCv
+  useTx pool $ do
+    conversationID <- addConversationRoot conversation
+    let
+      mbRootNode = findRootNode conversation.mappingCv
+    case mbRootNode of
+      Nothing -> pure . Left $ "@[addConversation] no root node found"
+      Just rootNode -> do
+        eiTreeRez <- addNodeTreeSession conversationID conversation.mappingCv rootNode.idNd Nothing
+        case eiTreeRez of
+          Left err -> pure . Left $ err <> ": " <> T.unpack ("Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv) <> "\n" <> show conversation
+          Right () -> pure . Right $ conversationID
+
+
+addConversationRoot :: Conversation -> Tx.Transaction Int64
+addConversationRoot conversation =
+  Tx.statement (conversation.titleCv, conversation.convIdCv, conversation.createTimeCv
+        , conversation.updateTimeCv) St.insertConversation
 
 addNodeSession :: Int64 -> Maybe Int64 -> Text -> Node -> Tx.Transaction Int64
 addNodeSession discussionID mbParentID node_id node = do
@@ -143,26 +165,6 @@ addNodeTreeSession discussionID mapping nodeEid mbParentID =
     Nothing -> pure . Left $ "@[addNodeTreeSession] node not found: " <> show nodeEid
 
 
--- Main session: wrap in transaction
-useTx :: Hp.Pool -> Tx.Transaction tr -> IO (Either Hp.UsageError tr)
-useTx pool stmts = Hp.use pool (Tx.transaction Tx.ReadCommitted Tx.Write stmts)   -- 
-
-
-addDiscussion :: Hp.Pool -> Conversation -> IO (Either Hp.UsageError (Either String Int64))
-addDiscussion pool discussion = do
-  -- liftIO $ putStrLn $ "@[addDiscussion] adding discussion: " <> show discussion.titleCv
-  useTx pool $ do
-    discussionID <- addDiscussionSession discussion
-    let
-      mbRootNode = findRootNode discussion.mappingCv
-    case mbRootNode of
-      Nothing -> pure . Left $ "@[addDiscussion] no root node found"
-      Just rootNode -> do
-        eiTreeRez <- addNodeTreeSession discussionID discussion.mappingCv rootNode.idNd Nothing
-        case eiTreeRez of
-          Left err -> pure . Left $ err <> ": " <> T.unpack ("Title: " <> discussion.titleCv <> ", id: " <> discussion.convIdCv) <> "\n" <> show discussion
-          Right () -> pure . Right $ discussionID
-
 -- New stuff for multimodal text content:
 
 {-
@@ -182,7 +184,7 @@ addMultiModalPartSession contentID part = do
     AudioAssetPointerPT value -> do
       assetPtrID <- Tx.statement (partID, value.expiryDatetimeAap, value.assetPointerAap, fromIntegral value.sizeBytesAap, value.formatAap, value.toolAudioDirectionAap) St.insertAudioAssetPointerMMPartStmt
       case value.metadataAap of
-        Just metadata -> addAudioMetadataSession assetPtrID metadata
+        Just metadata -> addAudioMetadata 1 assetPtrID metadata
         Nothing -> return ()
     TextPT text -> Tx.statement (partID, text) St.insertTextMMPartStmt
     ImageAssetPointerPT assetPointer sizeBytes width height fovea metadata -> do
@@ -203,7 +205,7 @@ addMultiModalPartSession contentID part = do
           , audioStartTimestamp
         ) St.insertRealTimeUserAVMMPartStmt
       case audioAssetPointer.metadataAap of
-        Just metadata -> addAudioMetadataSession assetPtrID metadata
+        Just metadata -> addAudioMetadata 2 assetPtrID metadata
         Nothing -> return ()
 
 
@@ -216,176 +218,40 @@ mmPartContentType (TextPT {}) = "text"
 
 
 addImageMetadataSession :: Int64 -> ImageMetadata -> Tx.Transaction ()
-addImageMetadataSession partID md = do
-  dalle_uid <- case md.dalleMd of
-    Just d -> Just <$> addDalleSession partID d
-    Nothing -> return Nothing
-  gen_uid <- case md.generationMd of
-    Just g -> Just <$> addGenerationSession partID g
-    Nothing -> return Nothing
-  Tx.statement (dalle_uid, fmap Ae.toJSON md.gizmoMd, gen_uid, fromIntegral <$> md.containerPixelHeightMd
+addImageMetadataSession imagePtrID md = do
+  metaID <- Tx.statement (imagePtrID, Ae.toJSON <$> md.gizmoMd, fromIntegral <$> md.containerPixelHeightMd
       , fromIntegral <$> md.containerPixelWidthMd, Ae.toJSON <$> md.emuOmitGlimpseImageMd
       , Ae.toJSON <$> md.emuPatchesOverrideMd, Ae.toJSON <$> md.lpeKeepPatchIjhwMd
       , Ae.toJSON <$> md.lpeDeltaEncodingChannelMd, md.sanitizedMd, Ae.toJSON <$> md.assetPointerLinkMd
       , Ae.toJSON <$> md.watermarkedAssetPointerMd, Ae.toJSON <$> md.isNoAuthPlaceholderMd) St.insertImageMetadataStmt
 
-addDalleSession :: Int64 -> Dalle -> Tx.Transaction Int64
-addDalleSession partID d =
-  Tx.statement (d.genIdDa, d.promptDa, fromIntegral <$> d.seedDa, d.parentGenIdDa, d.editOpDa, d.serializationTitleDa) St.insertDalleStmt
-
-addGenerationSession :: Int64 -> Generation -> Tx.Transaction Int64
-addGenerationSession partID g =
-  Tx.statement (g.genIdGe, g.genSizeGe, fromIntegral <$> g.seedGe, g.parentGenIdGe
-        , fromIntegral g.heightGe, fromIntegral g.widthGe, g.transparentBackgroundGe, g.serializationTitleGe, g.orientationGe) St.insertGenerationStmt
+  case md.dalleMd of
+    Just aDalle -> addDalle metaID aDalle
+    Nothing -> pure ()
+  case md.generationMd of
+    Just aGeneration -> addGeneration metaID aGeneration
+    Nothing -> pure ()
 
 
-addAudioMetadataSession :: Int64 -> AudioMetadata -> Tx.Transaction ()
-addAudioMetadataSession partID md = do
+addDalle :: Int64 -> Dalle -> Tx.Transaction ()
+addDalle metaID d =
+  Tx.statement (metaID, d.genIdDa, d.promptDa, fromIntegral <$> d.seedDa
+      , d.parentGenIdDa, d.editOpDa, d.serializationTitleDa) St.insertDalleStmt
+
+
+addGeneration :: Int64 -> Generation -> Tx.Transaction ()
+addGeneration metaID g =
+  Tx.statement (metaID, g.genIdGe, g.genSizeGe, fromIntegral <$> g.seedGe, g.parentGenIdGe
+        , fromIntegral g.heightGe, fromIntegral g.widthGe, g.transparentBackgroundGe
+        , g.serializationTitleGe, g.orientationGe) St.insertGenerationStmt
+
+
+addAudioMetadata :: Int32 -> Int64 -> AudioMetadata -> Tx.Transaction ()
+addAudioMetadata itemKind itemID md = do
   Tx.statement (
-      partID, Ae.toJSON <$> md.startTimestampAm, Ae.toJSON <$> md.endTimestampAm
+      itemID, itemKind, Ae.toJSON <$> md.startTimestampAm, Ae.toJSON <$> md.endTimestampAm
       , Ae.toJSON <$> md.pretokenizedVqAm, Ae.toJSON <$> md.interruptionsAm
       , Ae.toJSON <$> md.originalAudioSourceAm, Ae.toJSON <$> md.transcriptionAm
       , Ae.toJSON <$> md.wordTranscriptionAm, md.startAm, md.endAm
     ) St.insertAudioMetadataStmt
 
-
--- Reading the DB:
-fetchAllDiscussions :: Hp.Pool -> IO (Either Hp.UsageError (Mp.Map Text Int64))
-fetchAllDiscussions pool = do
-  dbRez <- Hp.use pool (Ses.statement () St.fetchAllDiscussions)
-  case dbRez of
-    Left ue -> pure . Left $ ue
-    Right discussions ->
-      let
-        discussionMap = Mp.fromList $ map (\(uid, title) -> (title, uid)) (V.toList discussions)
-      in
-      pure $ Right discussionMap
-
---- Storing the Discussion context:
--- | Persist a 'Context' (and all nested MessageFsm structures) into Postgres.
---
--- Requirements satisfied:
---   * Uses hasql-transaction to wrap inserts atomically (rollback on failure).
---   * Uses embedded SQL quasiquotes (hasql-th) instead of string SQL.
---   * Targets the schema under the "legal" Postgres schema provided earlier.
---
--- Notes:
---   * We avoid passing custom enum types as parameters directly; instead we pass
---     'text' and cast to enum inside SQL (to keep hasql-th type mappings simple).
---   * Adjust the import for your conversation types.
---
-
--- | Store a Context atomically.
---
--- Returns the (context_uid, context_uuid) on success.
--- Any failure rolls back the entire insert.
-storeDiscussion :: Hp.Pool -> Text -> Text -> Context -> IO (Either String (Int64, UUID))
-storeDiscussion pool title convId ctx = do
-  r <- Hp.use pool $
-    Tx.transaction Tx.ReadCommitted Tx.Write $ do
-      (ctxUid, ctxUuid) <- Tx.statement (title, convId) St.insertContext
-
-      -- issues :: [Text]
-      forM_ (zip [1 :: Int32 ..] ctx.issues) $ \(i, t) ->
-        Tx.statement (ctxUid, i, t) St.insertContextIssue
-
-      -- messages :: [MessageFsm]
-      inserted <- forM (zip [1 :: Int32 ..] (reverse ctx.messages)) $ \(i, m) -> do
-        let (kindTxt, createdTs, updatedTs) = messageHeaderData m
-        msgUid <- Tx.statement (ctxUid, i, kindTxt, createdTs, updatedTs) St.insertMessage
-
-        case m of
-          UserMF _ um -> do
-            Tx.statement (msgUid, um.textUM) St.insertUserMessage
-            addAttachments msgUid um.attachmentsUM
-
-          AssistantMF _ am -> do
-            respUid <- case response am of
-              Nothing -> pure Nothing
-              Just (ResponseAst txt) -> Just <$> Tx.statement txt St.insertResponseAst
-
-            Tx.statement (msgUid, respUid) St.insertAssistantMessage
-            addAttachments msgUid am.attachmentsAM
-            addSubActions msgUid am.subActions
-
-          SystemMF _ (SystemMessage txt) ->
-            Tx.statement (msgUid, txt) St.insertSystemMessage
-
-          ToolMF _ (ToolMessage txt) ->
-            Tx.statement (msgUid, txt) St.insertToolMessage
-
-          UnknownMF _ (UnknownMessage txt) ->
-            Tx.statement (msgUid, txt) St.insertUnknownMessage
-
-        pure (i, msgUid, messageKey m)
-
-      pure (ctxUid, ctxUuid)
-  pure $ either (Left . show) Right r
-
-
-addAttachments :: Int64 -> [Text] -> Tx.Transaction ()
-addAttachments msgUid xs =
-  forM_ (zip [1 :: Int32 ..] xs) $ \(i, v) ->
-    Tx.statement (msgUid, i, v) St.insertAttachment
-
-addSubActions :: Int64 -> [SubAction] -> Tx.Transaction ()
-addSubActions msgUid sas =
-  forM_ (zip [1 :: Int32 ..] sas) $ \(i, sa) ->
-    case sa of
-      ReflectionSA rf -> do
-        saUid <- Tx.statement (msgUid, i, "reflection", Nothing) St.insertSubAction
-        rfUid <- Tx.statement (saUid, summaryRF rf, contentRF rf, finishedRF rf) St.insertReflection
-        forM_ (zip [1 :: Int32 ..] (chunksRF rf)) $ \(j, t) ->
-          Tx.statement (rfUid, j, t) St.insertReflectionChunk
-
-      CodeSA cc -> do
-        saUid <- Tx.statement (msgUid, i, "code", Nothing) St.insertSubAction
-        Tx.statement (saUid, languageCC cc, responseFormatNameCC cc, textCC cc) St.insertCode
-
-      ToolCallSA tc -> do
-        saUid <- Tx.statement (msgUid, i, "tool_call", Nothing) St.insertSubAction
-        Tx.statement (saUid, toolNameTC tc, toolInputTC tc) St.insertToolCall
-
-      IntermediateSA t ->
-        void $ Tx.statement (msgUid, i, "intermediate", Just t) St.insertSubAction
-
-
--- -----------------------
--- Keying / timing
--- -----------------------
-
--- Used only for best-effort matching of currentMsg.
-messageKey :: MessageFsm -> (Text, Maybe Double, Maybe Double, Text)
-messageKey m =
-  let (Timing c u, body, k) = case m of
-        UserMF t um -> (t, um.textUM, "user")
-        AssistantMF t am ->
-          ( t
-          , maybe "" (\(ResponseAst x) -> x) am.response
-          , "assistant"
-          )
-        SystemMF t (SystemMessage x) -> (t, x, "system")
-        ToolMF t (ToolMessage x) -> (t, x, "tool")
-        UnknownMF t (UnknownMessage x) -> (t, x, "unknown")
-  in (k, c, u, T.take 2000 body)
-
-messageHeaderData :: MessageFsm -> (Text, Maybe UTCTime, Maybe UTCTime)
-messageHeaderData m =
-  let Timing c u = case m of
-        UserMF t _ -> t
-        AssistantMF t _ -> t
-        SystemMF t _ -> t
-        ToolMF t _ -> t
-        UnknownMF t _ -> t
-  in (messageKindText m, epochToUtc <$> c, epochToUtc <$> u)
-
-messageKindText :: MessageFsm -> Text
-messageKindText m = case m of
-  UserMF{} -> "user"
-  AssistantMF{} -> "assistant"
-  SystemMF{} -> "system"
-  ToolMF{} -> "tool"
-  UnknownMF{} -> "unknown"
-
-epochToUtc :: Double -> UTCTime
-epochToUtc = posixSecondsToUTCTime . realToFrac

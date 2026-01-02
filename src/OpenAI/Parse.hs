@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
-
 module OpenAI.Parse where
 
 import qualified Data.ByteString.Lazy as Bl

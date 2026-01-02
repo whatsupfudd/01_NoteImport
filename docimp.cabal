@@ -44,15 +44,21 @@ library
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
-      OpenAI.Elmify
-      OpenAI.GenDocx
-      OpenAI.GenDocxDb
-      OpenAI.InOperations
+      OpenAI.Conversation
+      OpenAI.ConvToDisc
+      OpenAI.Deserialize.Conversation
+      OpenAI.Deserialize.ConversationStmt
+      OpenAI.Deserialize.Discussion
+      OpenAI.Deserialize.DiscussionStmt
+      OpenAI.Generate.Docx
+      OpenAI.Generate.DocxDb
+      OpenAI.Generate.Elmify
       OpenAI.Json.Reader
-      OpenAI.Operations
       OpenAI.Parse
       OpenAI.ProjFetcher
-      OpenAI.Statements
+      OpenAI.Serialize.Conversation
+      OpenAI.Serialize.Discussion
+      OpenAI.Serialize.Statements
       OpenAI.Summarisation
       OpenAI.Types
       Options
@@ -101,6 +107,7 @@ library
     , scientific
     , text
     , time
+    , transformers
     , unix
     , unordered-containers
     , uuid
@@ -154,6 +161,7 @@ executable docimp
     , scientific
     , text
     , time
+    , transformers
     , unix
     , unordered-containers
     , uuid
@@ -208,6 +216,7 @@ test-suite docimp-test
     , scientific
     , text
     , time
+    , transformers
     , unix
     , unordered-containers
     , uuid

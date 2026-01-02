@@ -46,8 +46,8 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Types.Header (hContentType)
 
-import OpenAI.InOperations
-  ( ContextDb(..)
+import OpenAI.Deserialize.Discussion
+  ( DiscussionDb(..)
   , MessageDb(..)
   , MessageKindDb(..)
   , MessageBodyDb(..)
@@ -67,7 +67,7 @@ import OpenAI.InOperations
 --   * skips messages that already have a row in message_summary
 --   * on successful summarisation, upserts the DB row
 --   * continues on errors and returns a combined error string at the end
-summarizeDiscourseMessages :: Hp.Pool -> Manager -> ContextDb -> IO (Either String ())
+summarizeDiscourseMessages :: Hp.Pool -> Manager -> DiscussionDb -> IO (Either String ())
 summarizeDiscourseMessages pool httpManager ctx = do
   let candidates :: [(Int64, Text)]
       candidates =

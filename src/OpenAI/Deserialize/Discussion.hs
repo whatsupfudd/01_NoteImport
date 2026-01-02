@@ -3,7 +3,7 @@
 -- This module defines DB-optimised in-memory types carrying stable DB identities
 -- (uid + uuid) and convenient indexes for later modifications.
 --
-module OpenAI.InOperations where
+module OpenAI.Deserialize.Discussion where
 
 import Control.Monad (forM)
 
@@ -28,7 +28,7 @@ import qualified Hasql.Session as Ses
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
-import qualified OpenAI.Statements as St
+import qualified OpenAI.Deserialize.DiscussionStmt as St
 
 
 -- -----------------------------
@@ -141,7 +141,7 @@ data IndexDb = IndexDb
   }
   deriving (Show, Eq)
 
-data ContextDb = ContextDb
+data DiscussionDb = DiscussionDb
   { refCo :: !RefDb
   , titleCo :: !Text
   , convIdCo :: !Text
@@ -162,10 +162,10 @@ data ContextDb = ContextDb
 --   * Right Nothing  => context not found
 --   * Right (Just x) => loaded successfully
 --   * Left err       => DB error or unexpected schema inconsistency
-loadDiscourse :: Hp.Pool -> UUID -> IO (Either String (Maybe ContextDb))
-loadDiscourse pool discourseUuid = do
+loadDiscussion :: Hp.Pool -> UUID -> IO (Either String (Maybe DiscussionDb))
+loadDiscussion pool discourseUuid = do
   rez <- Hp.use pool $
-    TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscourseTx discourseUuid)
+    TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx discourseUuid)
 
   -- Flatten: Pool.use gives Either UsageError a
   pure $ case first show rez of
@@ -174,9 +174,9 @@ loadDiscourse pool discourseUuid = do
     Right (Right ctx) -> Right ctx
 
 
-findDiscourseByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))
-findDiscourseByConvId pool convId = do
-  eiRezA <- Hp.use pool $ Ses.statement convId St.selectContextByConvId
+findDiscussionByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))
+findDiscussionByConvId pool convId = do
+  eiRezA <- Hp.use pool $ Ses.statement convId St.selectDiscussionByConvId
   case eiRezA of
     Left err -> pure . Left $ show err
     Right Nothing -> pure . Right $ Nothing
@@ -184,9 +184,9 @@ findDiscourseByConvId pool convId = do
       pure . Right $ Just ctxUuid
 
 
-loadDiscourseTx :: UUID -> Tx.Transaction (Either String (Maybe ContextDb))
-loadDiscourseTx discourseUuid = do
-  mCtx <- Tx.statement discourseUuid St.selectContextByUuid
+loadDiscussionTx :: UUID -> Tx.Transaction (Either String (Maybe DiscussionDb))
+loadDiscussionTx discourseUuid = do
+  mCtx <- Tx.statement discourseUuid St.selectDiscussionByUuid
   case mCtx of
     Nothing -> pure (Right Nothing)
     Just (ctxUid, foundUuid, title, convId) -> do
@@ -200,8 +200,8 @@ loadDiscourseTx discourseUuid = do
       cds <- Tx.statement ctxUid St.selectCodes
       tcs <- Tx.statement ctxUid St.selectToolCalls
 
-      pure $ first ("buildContextDb: " <>)
-              ( Just <$> buildContextDb (ctxUid, foundUuid, title, convId) is ms sms as sas rfs rcs cds tcs )
+      pure $ first ("buildDiscussionDb: " <>)
+              ( Just <$> buildDiscussionDb (ctxUid, foundUuid, title, convId) is ms sms as sas rfs rcs cds tcs )
 
 
 -- -----------------------------
@@ -213,7 +213,7 @@ loadDiscourseTx discourseUuid = do
 -- Assembly
 -- -----------------------------
 
-buildContextDb
+buildDiscussionDb
  :: (Int64, UUID, Text, Text)
   -> Vector (Int32, Text)
   -> Vector St.MessageRow
@@ -224,8 +224,8 @@ buildContextDb
   -> Vector St.ReflectionChunkRow
   -> Vector St.CodeRow
   -> Vector St.ToolCallRow
-  -> Either String ContextDb
-buildContextDb (ctxUid, ctxUuid, title, convId) issuesV msgRowsV summariesRv attRowsV saRowsV relectionsRv rfChunkRowsV codeRowsV toolRowsV = do
+  -> Either String DiscussionDb
+buildDiscussionDb (ctxUid, ctxUuid, title, convId) issuesV msgRowsV summariesRv attRowsV saRowsV relectionsRv rfChunkRowsV codeRowsV toolRowsV = do
   let
     issueObjs = V.map (uncurry IssueDb) issuesV
 
@@ -302,7 +302,7 @@ buildContextDb (ctxUid, ctxUuid, title, convId) issuesV msgRowsV summariesRv att
     -- build indexes
     idx = buildIndex msgV
 
-  pure $ ContextDb
+  pure $ DiscussionDb
       { refCo = RefDb ctxUid ctxUuid
       , titleCo = title
       , convIdCo = convId

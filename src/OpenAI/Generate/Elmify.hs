@@ -13,7 +13,7 @@
 -- The <conversation_eid> is the external ID stored on oai.discourse.conversation_eid
 -- (NOT the UUID).
 --
-module OpenAI.Elmify ( elmifyDiscourseByEid, discourseToElmItems)
+module OpenAI.Generate.Elmify ( elmifyDiscourseByEid, discourseToElmItems)
 where
 
 import Control.Monad (when)
@@ -46,8 +46,8 @@ import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
 
-import OpenAI.InOperations
-  ( ContextDb(..)
+import OpenAI.Deserialize.Discussion
+  ( DiscussionDb(..)
   , MessageDb(..)
   , MessageKindDb(..)
   , MessageBodyDb(..)
@@ -57,7 +57,7 @@ import OpenAI.InOperations
   , RefDb(..)
   , IssueDb(..)
   )
-import qualified OpenAI.InOperations as InO
+import qualified OpenAI.Deserialize.Discussion as InO
 import OpenAI.Types (OaiCodeJson(..))
 
 
@@ -81,7 +81,7 @@ elmifyDiscourseByEid destPath discourseEid pool fileTitle = do
     Left err -> pure (Left err)
     Right Nothing -> pure (Left ("discourse not found for conversation_eid=" <> T.unpack discourseEid))
     Right (Just uuid) -> do
-      eCtx <- InO.loadDiscourse pool uuid
+      eCtx <- InO.loadDiscussion pool uuid
       case eCtx of
         Left err -> pure (Left err)
         Right Nothing -> pure (Left ("discourse UUID resolved but load returned Nothing: " <> show uuid))
@@ -117,7 +117,7 @@ selectDiscourseUuidByEid =
 -- ---------------------------------
 
 -- | Render the full Elm module.
-renderElmModule :: FilePath -> Text -> Text -> ContextDb -> Text
+renderElmModule :: FilePath -> Text -> Text -> DiscussionDb -> Text
 renderElmModule moduleName discussionId fileTitle ctx =
   let items = discourseToElmItems ctx
       issues = issuesToElm ctx
@@ -141,7 +141,7 @@ renderElmModule moduleName discussionId fileTitle ctx =
 --   ]
 --
 -- Non user/assistant roles are skipped (same as old logic).
-discourseToElmItems :: ContextDb -> Text
+discourseToElmItems :: DiscussionDb -> Text
 discourseToElmItems ctx =
   let
     msgs = V.toList (messagesCo ctx)
@@ -150,7 +150,7 @@ discourseToElmItems ctx =
   in "[\n  " <> T.intercalate "\n  , " kept <> "\n  ]"
 
 
-issuesToElm :: ContextDb -> Text
+issuesToElm :: DiscussionDb -> Text
 issuesToElm ctx =
   let xs = map textIs (V.toList (issuesCo ctx))
   in "[ " <> T.intercalate ", " (map elmString xs) <> " ]"

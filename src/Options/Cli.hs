@@ -210,34 +210,53 @@ ingestOpts =
 oaiSubCommands :: Parser Command
 oaiSubCommands =
   OaiCmd <$> subparser (
-    command "json" (info (JsonSC <$> oaiJsonOpts) (progDesc "OpenAI JSON command."))
-    <> command "docx" (info (DocxSC <$> oaiGenOpts) (progDesc "OpenAI DOCX command."))
-    <> command "summary" (info (SummarySC <$> oaiSummaryOpts) (progDesc "OpenAI Summary command."))
-    <> command "elm" (info (ElmSC <$> oaiGenOpts) (progDesc "OpenAI Elm command."))
-    <> command "project" (info (ProjFetchSC <$> oaiProjFetchOpts) (progDesc "OpenAI Project Fetch command."))
+    -- TODO: json subcommands: print, save.
+    command "json" (info (JsonSC <$> jsonSubCommands) (progDesc "Ingest OpenAI conversations as JSON files."))
+    -- TODO: conversion: conversation to discussion, discussion to HBDoc.
+    <> command "docx" (info (DocxSC <$> oaiGenOpts) (progDesc "Create DOCX documents."))
+    <> command "summary" (info (SummarySC <$> oaiTargetsOpts) (progDesc "Summarise discussions."))
+    <> command "elm" (info (ElmSC <$> oaiGenOpts) (progDesc "Create Elm documents."))
+    <> command "project" (info (ProjFetchSC <$> oaiProjFetchOpts) (progDesc "Ingest OpenAI Project html files."))
+    <> command "conversation" (info (ConversationSC <$> conversationSubCommands) (progDesc "Process conversations."))
   )
 
+jsonSubCommands :: Parser JsonSubCommand
+jsonSubCommands =
+  subparser (
+    command "print" (info (PrintJS <$> oaiJsonOpts <*> oaiTargetsOpts) (progDesc "Print the JSON to the console."))
+    <> command "store" (info (StoreJS <$> oaiJsonOpts <*> oaiTargetsOpts) (progDesc "Store the JSON to the database."))
+  )
 
-oaiJsonOpts :: Parser OaiOpts
+oaiJsonOpts :: Parser OaiJsonOpts
 oaiJsonOpts =
-  OaiOpts <$>
+  OaiJsonOpts <$>
     switch (long "export" <> short 'e' <> help "Comes from the OpenAI export service." <> showDefault)
-    <*> switch (long "print" <> short 'p' <> help "Print the discussions to the console instead of saving to the database." <> showDefault)
     <*> strArgument (metavar "JSONFILE" <> help "JSON file file path")
 
-oaiSummaryOpts :: Parser OaiSummaryOpts
-oaiSummaryOpts =
-  OaiSummaryOpts <$>
+oaiTargetsOpts :: Parser TargetsOpts
+oaiTargetsOpts =
+  TargetsOpts <$>
     some (strOption (long "target" <> short 't' <> help "A target to summarize." <> metavar "TARGET"))
+    <*> optional (strOption (long "group" <> short 'g' <> help "The group of discussions to select." <> metavar "GROUP"))
 
 oaiGenOpts :: Parser OaiGenOpts
 oaiGenOpts =
   OaiGenOpts <$>
     strArgument (help "Destination directory." <> metavar "DESTDIR")
     <*> some (strOption (long "target" <> short 't' <> help "A target to elmify." <> metavar "TARGET"))
+    <*> optional (strOption (long "group" <> short 'g' <> help "The group of discussions to select." <> metavar "GROUP"))
 
 oaiProjFetchOpts :: Parser OaiProjFetchOpts
 oaiProjFetchOpts =
   OaiProjFetchOpts <$>
     strOption (long "label" <> short 'l' <> help "The label of the project to fetch." <> metavar "LABEL")
     <*> strArgument (help "Source file path." <> metavar "SOURCEPATH")
+
+
+conversationSubCommands :: Parser ConversationSubCommand
+conversationSubCommands =
+  subparser (
+    command "deserialize" (info (DeserializeCS <$> oaiGenOpts) (progDesc "Deserialize a conversation."))
+    <> command "convert" (info (ConvertCS <$> oaiTargetsOpts) (progDesc "Convert a conversation to a discussion."))
+    <> command "docx" (info (DocxCS <$> oaiGenOpts) (progDesc "Create DOCX documents."))
+  )

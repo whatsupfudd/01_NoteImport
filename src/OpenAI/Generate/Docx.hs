@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveGeneric #-}
-module OpenAI.GenDocx where
+module OpenAI.Generate.Docx where
 
 import Control.Monad (forM, void)
 import Control.Monad.IO.Class (liftIO)
@@ -117,8 +117,9 @@ messageToBlocks httpManager idx msg = do
   case msg of
     UserMF t um -> do
       body <- parseMarkdownBlocks um.textUM
-      eiSummary <- liftIO $ summarizeOneLineTOC httpManager um.textUM
+      -- eiSummary <- liftIO $ summarizeOneLineTOC httpManager um.textUM
       let
+        eiSummary = Left "(no summary)"
         summary = fromRight (fallbackOneLine um.textUM) eiSummary
         header = messageHeaderWithSummary "Manager" t anchor summary
             -- messageHeader "Client" t anchor
@@ -136,8 +137,9 @@ messageToBlocks httpManager idx msg = do
         case mainText of
           "" -> pure []
           _ -> parseMarkdownBlocks mainText
-      eiSummary <- liftIO $ summarizeOneLineTOC httpManager mainText
+      -- eiSummary <- liftIO $ summarizeOneLineTOC httpManager mainText
       let
+        eiSummary = Left "(no summary)"
         summary = fromRight (fallbackOneLine mainText) eiSummary
         header = messageHeaderWithSummary "Analyst" t anchor summary
         attachments = attachmentsBlocks am.attachmentsAM
@@ -364,7 +366,7 @@ writerOpts =
 
 -- Set to (Just "./assets/reference.docx") once you check in your style template.
 referenceDocPath :: Maybe FilePath
-referenceDocPath = Nothing
+referenceDocPath = Just "Assets/gfReference_1.docx"
 
 
 -- -------------------------------

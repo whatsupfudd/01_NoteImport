@@ -2,10 +2,10 @@
 
 -- | DOCX generation from the DB-backed in-memory discourse model.
 --
--- This mirrors 'OpenAI.GenDocx' but consumes 'ContextDb' (soon: Discourse)
+-- This mirrors 'OpenAI.GenDocx' but consumes 'ContextDb' (soon: DiscussionDb)
 -- from 'OpenAI.InOperations'.
 --
-module OpenAI.GenDocxDb where
+module OpenAI.Generate.DocxDb where
 
 import Control.Monad (forM, void)
 import Control.Monad.IO.Class (liftIO)
@@ -33,8 +33,8 @@ import Text.Pandoc.Walk (walk)
 import OpenAI.Parse (sanitizeText)
 import OpenAI.Types (OaiCodeJson(..))
 
-import OpenAI.InOperations
-  ( ContextDb(..)
+import OpenAI.Deserialize.Discussion
+  ( DiscussionDb(..)
   , MessageDb(..)
   , MessageKindDb(..)
   , MessageBodyDb(..)
@@ -46,25 +46,18 @@ import OpenAI.InOperations
   )
 
 
--- --------------------------------
--- Compatibility / naming transition
--- --------------------------------
-
-type Discourse = ContextDb
-
-
 -- -------------------------------
 -- Public API
 -- -------------------------------
 
--- | Generate a DOCX file from a DB-backed 'Discourse'/'ContextDb'.
+-- | Generate a DOCX file from a DB-backed 'DiscussionDb'/'ContextDb'.
 --
 -- Returns:
 --   * Right () on success
 --   * Left <error> on failure
 --
-writeDiscourseDocx :: Discourse -> Text -> FilePath -> IO (Either String ())
-writeDiscourseDocx discourse title outPath = do
+writeDiscussionDbDocx :: DiscussionDb -> Text -> FilePath -> IO (Either String ())
+writeDiscussionDbDocx discourse title outPath = do
   e <- P.runIO $ do
     pd0 <- discourseToPandoc title discourse
     let pd1 = normalizePandoc pd0
@@ -77,7 +70,7 @@ writeDiscourseDocx discourse title outPath = do
 -- Pandoc construction
 -- -------------------------------
 
-discourseToPandoc :: Text -> Discourse -> P.PandocIO P.Pandoc
+discourseToPandoc :: Text -> DiscussionDb -> P.PandocIO P.Pandoc
 discourseToPandoc title discourse = do
   -- NOTE: DB model already carries stable seq ordering in 'messagesCo'.
   msgBlocks <- concat <$> forM (zip [1 :: Int ..] (V.toList discourse.messagesCo)) (uncurry messageDbToBlocks)
