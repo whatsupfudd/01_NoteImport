@@ -52,13 +52,16 @@ library
       OpenAI.Deserialize.DiscussionStmt
       OpenAI.Generate.Docx
       OpenAI.Generate.DocxDb
+      OpenAI.Generate.DocxGeneral
       OpenAI.Generate.Elmify
       OpenAI.Json.Reader
       OpenAI.Parse
       OpenAI.ProjFetcher
       OpenAI.Serialize.Conversation
+      OpenAI.Serialize.ConversationStmt
       OpenAI.Serialize.Discussion
-      OpenAI.Serialize.Statements
+      OpenAI.Serialize.DiscussionStmt
+      OpenAI.Serialize.IncrUpdate
       OpenAI.Summarisation
       OpenAI.Types
       Options

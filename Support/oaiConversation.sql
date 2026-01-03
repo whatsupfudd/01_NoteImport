@@ -3,32 +3,41 @@ create schema if not exists oai;
 set schema 'oai';
 
 CREATE TABLE IF NOT EXISTS conversations (
-  uid BIGSERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  eid TEXT NOT NULL,
-  create_time DOUBLE PRECISION NOT NULL,
-  update_time DOUBLE PRECISION NOT NULL
+  uid BIGSERIAL PRIMARY KEY
+  , title TEXT NOT NULL
+  , eid uuid NOT NULL
+  , create_time timestamptzNOT NULL
+  , update_time timestamptz NOT NULL
 );
+create unique index if not exists conversations_eid_uq on conversations(eid);
+
 
 CREATE TABLE IF NOT EXISTS nodes (
-  uid BIGSERIAL PRIMARY KEY,
-  conversation_fk BIGINT REFERENCES conversations(uid) ON DELETE CASCADE,
-  eid TEXT NOT NULL,
-  parent_fk BIGINT REFERENCES nodes(uid)
+  uid BIGSERIAL PRIMARY KEY
+  , conversation_fk BIGINT REFERENCES conversations(uid) ON DELETE CASCADE
+  , eid uuid NOT NULL
+  , parent_fk BIGINT REFERENCES nodes(uid)
+  , seqnbr int not null default 0
 );
+create unique index if not exists nodes_conversation_seq_uq
+  on nodes(conversation_fk, seqnbr);
+create unique index if not exists nodes_conversation_eid_uq on nodes(conversation_fk, eid);
+create index if not exists nodes_conversation_parent_idx on nodes(conversation_fk, parent_fk);
+
 
 CREATE TABLE IF NOT EXISTS messages (
-  uid BIGSERIAL PRIMARY KEY,
-  node_fk BIGINT REFERENCES nodes(uid) ON DELETE CASCADE,
-  eid TEXT NOT NULL,
-  create_time DOUBLE PRECISION,
-  update_time DOUBLE PRECISION,
-  status TEXT NOT NULL,
-  end_turn BOOLEAN,
-  weight DOUBLE PRECISION NOT NULL,
-  metadata JSONB NOT NULL DEFAULT '{}',
-  recipient TEXT NOT NULL,
-  channel TEXT
+  uid BIGSERIAL PRIMARY KEY
+  , node_fk BIGINT REFERENCES nodes(uid) ON DELETE CASCADE
+  , eid TEXT NOT NULL
+  , create_time timestamptz NOT NULL
+  , update_time timestamptz NOT NULL
+  , status TEXT NOT NULL
+  , end_turn BOOLEAN
+  , weight DOUBLE PRECISION NOT NULL
+  , metadata JSONB NOT NULL DEFAULT '{}'
+  , recipient TEXT NOT NULL
+  , channel TEXT
+  , seqnbr int not null default 0
 );
 
 CREATE TABLE IF NOT EXISTS authors (
@@ -43,7 +52,10 @@ CREATE TABLE IF NOT EXISTS contents (
   uid BIGSERIAL PRIMARY KEY,
   message_fk BIGINT REFERENCES messages(uid) ON DELETE CASCADE,
   content_type TEXT NOT NULL
+  , seqnbr int not null default 0
 );
+create unique index if not exists contents_message_seq_uq
+  on contents(message_fk, seqnbr);
 
 
 CREATE TABLE IF NOT EXISTS code_contents (
@@ -112,13 +124,16 @@ CREATE TABLE IF NOT EXISTS thoughts_contents (
 );
 
 CREATE TABLE IF NOT EXISTS thoughts (
-  uid BIGSERIAL PRIMARY KEY,
-  thoughts_content_fk BIGINT REFERENCES thoughts_contents(content_fk) ON DELETE CASCADE,
-  summary TEXT NOT NULL,
-  content TEXT NOT NULL,
-  chunks JSONB NOT NULL DEFAULT '[]',
-  finished BOOLEAN NOT NULL
+  uid BIGSERIAL PRIMARY KEY
+  , thoughts_content_fk BIGINT REFERENCES thoughts_contents(content_fk) ON DELETE CASCADE
+  , summary TEXT NOT NULL
+  , content TEXT NOT NULL
+  , chunks JSONB NOT NULL DEFAULT '[]'
+  , finished BOOLEAN NOT NULL
+  , seqnbr int not null default 0
 );
+create unique index if not exists thoughts_content_seq_uq
+  on thoughts(thoughts_content_fk, seqnbr);
 
 
 
@@ -126,6 +141,7 @@ CREATE TABLE IF NOT EXISTS multimodal_parts (
   uid BIGSERIAL PRIMARY KEY
 , content_fk BIGINT REFERENCES contents(uid) ON DELETE CASCADE
 , content_type TEXT NOT NULL
+, seqnbr int not null default 0
 );
 
 
@@ -166,7 +182,7 @@ CREATE TABLE IF NOT EXISTS dalles (
   metadata_fk bigint primary key references metadatas_imgasset(uid) ON DELETE CASCADE,
   gen_id TEXT,
   prompt TEXT NOT NULL,
-  seed INT,
+  seed BIGINT,
   parent_gen_id TEXT,
   edit_op TEXT,
   serialization_title TEXT NOT NULL
@@ -176,7 +192,7 @@ CREATE TABLE IF NOT EXISTS generations (
   metadata_fk bigint primary key references metadatas_imgasset(uid) ON DELETE CASCADE,
   gen_id TEXT,
   gen_size TEXT NOT NULL,
-  seed INT,
+  seed BIGINT,
   parent_gen_id TEXT,
   height INT NOT NULL,
   width INT NOT NULL,
@@ -232,4 +248,25 @@ CREATE TABLE IF NOT EXISTS metadatas_audioasset (
   , start_stamp DOUBLE PRECISION NOT NULL
   , end_stamp DOUBLE PRECISION NOT NULL
   , primary key (assetptr_fk, part_kind)
+);
+
+create table if not exists oai.conversation_ingest (
+  uid bigserial primary key
+  , conversation_fk bigint not null references oai.conversations(uid) on delete cascade
+
+  -- identity for idempotency (choose what you have):
+  , source_key text                 -- e.g. filename, object-store key, or export-id
+  , source_sha256 bytea             -- hash of raw json (best)
+  , imported_at timestamptz not null default now()
+  , ingest_type text not null    -- export, single-file.
+  , unique (conversation_fk, source_sha256)
+);
+
+
+create table if not exists oai.conversation_previous (
+  uid bigserial primary key
+  , conversation_fk bigint not null references oai.conversations(uid) on delete cascade
+  , update_time timestamptz not null
+  , title text not null
+  , unique (conversation_fk, update_time)
 );

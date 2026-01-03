@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS discussion (
   uid BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
   , uuid UUID NOT NULL DEFAULT gen_random_uuid()
   , oaiid uuid not null
+  , title TEXT NOT NULL
   , created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   , updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   , CONSTRAINT discussion_uuid_uniq UNIQUE (uuid)

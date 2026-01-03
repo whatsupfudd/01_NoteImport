@@ -17,6 +17,7 @@ import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.UUID (UUID)
+import qualified Data.UUID as Uu
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
@@ -144,7 +145,7 @@ data IndexDb = IndexDb
 data DiscussionDb = DiscussionDb
   { refCo :: !RefDb
   , titleCo :: !Text
-  , convIdCo :: !Text
+  , convIdCo :: !UUID
   , issuesCo :: !(Vector IssueDb)
   , messagesCo :: !(Vector MessageDb)
   , indexCo :: !IndexDb
@@ -175,13 +176,16 @@ loadDiscussion pool discourseUuid = do
 
 
 findDiscussionByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))
-findDiscussionByConvId pool convId = do
-  eiRezA <- Hp.use pool $ Ses.statement convId St.selectDiscussionByConvId
-  case eiRezA of
-    Left err -> pure . Left $ show err
-    Right Nothing -> pure . Right $ Nothing
-    Right (Just (_, ctxUuid, _, _)) ->
-      pure . Right $ Just ctxUuid
+findDiscussionByConvId pool convId =
+  case Uu.fromString $ T.unpack convId of
+    Nothing -> pure . Left $ "@findDiscussionByConvId] invalid UUID: " <> T.unpack convId
+    Just oaiid -> do
+      eiRezA <- Hp.use pool $ Ses.statement oaiid St.selectDiscussionByConvId
+      case eiRezA of
+        Left err -> pure . Left $ show err
+        Right Nothing -> pure . Right $ Nothing
+        Right (Just (_, ctxUuid, _, _)) ->
+          pure . Right $ Just ctxUuid
 
 
 loadDiscussionTx :: UUID -> Tx.Transaction (Either String (Maybe DiscussionDb))
@@ -214,7 +218,7 @@ loadDiscussionTx discourseUuid = do
 -- -----------------------------
 
 buildDiscussionDb
- :: (Int64, UUID, Text, Text)
+ :: (Int64, UUID, Text, UUID)
   -> Vector (Int32, Text)
   -> Vector St.MessageRow
   -> Vector St.MessageSummaryRow

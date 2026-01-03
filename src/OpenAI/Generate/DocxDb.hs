@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
-
 -- | DOCX generation from the DB-backed in-memory discourse model.
 --
 -- This mirrors 'OpenAI.GenDocx' but consumes 'ContextDb' (soon: DiscussionDb)
@@ -45,6 +43,7 @@ import OpenAI.Deserialize.Discussion
   , IssueDb(..)
   )
 
+import OpenAI.Generate.DocxGeneral
 
 -- -------------------------------
 -- Public API
@@ -116,7 +115,7 @@ messageDbToBlocks idx msg = do
       body <- parseMarkdownBlocks txt
       let
         -- TODO: implement summary as part of DB-extracted info.
-        summary = fromMaybe "(no summary)" mbSummary
+        summary = fromMaybe (fallbackOneLine txt) mbSummary
         header = messageHeaderWithSummaryDb "Manager" msg anchor summary
         attachments = attachmentsBlocksDb msg.attachmentsMb
 
@@ -138,7 +137,7 @@ messageDbToBlocks idx msg = do
           _ -> parseMarkdownBlocks mainText
 
       let
-        summary = fromMaybe "(no summary)" mbSummary
+        summary = fromMaybe (fallbackOneLine mainText) mbSummary
         header = messageHeaderWithSummaryDb "Analyst" msg anchor summary
         attachments = attachmentsBlocksDb msg.attachmentsMb
 
@@ -267,145 +266,6 @@ subActionsBlocksDb v = fmap concat $ forM (V.toList v) $ \sa ->
         _ -> pure [P.Para [P.Str "(invalid intermediate sub-action payload)"]]
 
 
--- -------------------------------
--- Parsing & normalization
--- -------------------------------
-
-parseMarkdownBlocks :: Text -> P.PandocIO [P.Block]
-parseMarkdownBlocks src = do
-  let src' = normalizeSourceText src
-  P.Pandoc _ bs <- P.readMarkdown readerOpts src'
-  pure bs
-
--- | Light pre-normalization on the raw source string before Pandoc.
---
--- For v1 we do *not* attempt a true MathML → TeX conversion here.
--- We only ensure the reader sees coherent Markdown.
-normalizeSourceText :: Text -> Text
-normalizeSourceText = id
-
--- | Normalize the Pandoc AST so DOCX output remains readable.
---
--- Policies:
---   * Complex raw HTML blocks are converted into fenced code blocks (language=html).
---   * MathML inside raw HTML is also “literalized” as code for now (language=mathml).
-normalizePandoc :: P.Pandoc -> P.Pandoc
-normalizePandoc =
-  walk normalizeHtmlBlocks
-    . walk normalizeHtmlInlines
-
-normalizeHtmlBlocks :: P.Block -> P.Block
-normalizeHtmlBlocks b = case b of
-  P.RawBlock (P.Format "html") h
-    | containsMathML h ->
-        styledDiv "GF Code Block" [P.CodeBlock (codeAttr "mathml") h]
-    | isComplexHtml h ->
-        styledDiv "GF Code Block" [P.CodeBlock (codeAttr "html") h]
-    | otherwise -> P.RawBlock (P.Format "html") h
-  _ -> b
-
-normalizeHtmlInlines :: P.Inline -> P.Inline
-normalizeHtmlInlines i = case i of
-  P.RawInline (P.Format "html") h
-    | containsMathML h -> P.Code nullAttr "<mathml>"
-    | isComplexHtml h -> P.Code nullAttr (truncateInline h)
-    | otherwise -> P.RawInline (P.Format "html") h
-  _ -> i
-
-truncateInline :: Text -> Text
-truncateInline t =
-  let t' = T.strip t
-  in if T.length t' <= 80 then t' else T.take 77 t' <> "…"
-
-containsMathML :: Text -> Bool
-containsMathML t =
-  let tl = T.toLower t
-  in "<math" `T.isInfixOf` tl || "</math" `T.isInfixOf` tl
-
--- Heuristic: treat layout-heavy blocks as “complex HTML”.
-isComplexHtml :: Text -> Bool
-isComplexHtml t =
-  let tl = T.toLower t
-      has tag = tag `T.isInfixOf` tl
-      longish = T.length (T.strip t) > 180
-      layouty =
-        or
-          [ has "<div"
-          , has "<section"
-          , has "<article"
-          , has "<table"
-          , has "<style"
-          , has "class="
-          , has "tailwind"
-          ]
-  in longish || layouty
-
-
--- -------------------------------
--- Options
--- -------------------------------
-
-readerOpts :: Po.ReaderOptions
-readerOpts =
-  def
-    { Po.readerExtensions = mdExtensions
-    }
-
--- Extensions tuned for LLM-ish mixed Markdown.
-mdExtensions :: Po.Extensions
-mdExtensions =
-  foldl' (flip Po.enableExtension) Po.githubMarkdownExtensions
-    [ Po.Ext_raw_html
-    , Po.Ext_fenced_code_blocks
-    , Po.Ext_backtick_code_blocks
-    , Po.Ext_pipe_tables
-    , Po.Ext_table_captions
-    , Po.Ext_task_lists
-    , Po.Ext_tex_math_dollars
-    , Po.Ext_tex_math_single_backslash
-    ]
-
-writerOpts :: Po.WriterOptions
-writerOpts =
-  def
-    { Po.writerTableOfContents = True
-    , Po.writerTOCDepth = 2
-    , Po.writerReferenceDoc = referenceDocPath
-    }
-
--- Set to (Just "./assets/reference.docx") once you check in your style template.
-referenceDocPath :: Maybe FilePath
-referenceDocPath = Just "Assets/gfReference_1.docx"
-
-
--- -------------------------------
--- Small helpers
--- -------------------------------
-
-nullAttr :: P.Attr
-nullAttr = ("", [], [])
-
-mkIdAttr :: Text -> P.Attr
-mkIdAttr ident = (ident, [], [])
-
-styledDiv :: Text -> [P.Block] -> P.Block
-styledDiv styleName =
-  P.Div ("", [], [("custom-style", styleName)])
-
-codeAttr :: Text -> P.Attr
-codeAttr lang = ("", [lang], [])
-
-renderDbTime :: Maybe UTCTime -> Maybe UTCTime -> Text
-renderDbTime c u =
-  case (c, u) of
-    (Just ct, _) -> renderUtc ct
-    (Nothing, Just ut) -> "(upd) " <> renderUtc ut
-    _ -> "(no timestamp)"
-
-renderUtc :: UTCTime -> Text
-renderUtc utc =
-  T.pack (formatTime defaultTimeLocale "%y-%m-%d %H:%M:%S" utc)
-
 messageHeaderWithSummaryDb :: Text -> MessageDb -> Text -> Text -> P.Block
 messageHeaderWithSummaryDb role msg anchorId tocLine =
   P.Div ("", [], [("custom-style", "GF MessageHeader")]) [
@@ -418,62 +278,3 @@ messageHeaderWithSummaryDb role msg anchorId tocLine =
         ]
       , styledDiv "GF MessageTimestamp" [ P.Para [ P.Str (renderDbTime msg.createdAtMb msg.updatedAtMb) ] ]
     ]
-
-
-
--- -------------------------------
--- Summarisation service (Ollama)
--- -------------------------------
-
-
-cleanOneLine :: Text -> Text
-cleanOneLine =
-    truncateWords 14
-  . truncateChars 120
-  . collapseWS
-  . T.strip
-
-collapseWS :: Text -> Text
-collapseWS =
-  T.unwords . T.words . T.map (\c -> if c == '\n' || c == '\r' || c == '\t' then ' ' else c)
-
-truncateChars :: Int -> Text -> Text
-truncateChars n t
-  | T.length t <= n = t
-  | otherwise       = T.take (max 0 (n - 1)) t <> "…"
-
-truncateWords :: Int -> Text -> Text
-truncateWords n t =
-  let ws = T.words t
-  in T.unwords (take n ws)
-
-fallbackOneLine :: Text -> Text
-fallbackOneLine =
-    truncateWords 14
-  . truncateChars 120
-  . collapseWS
-  . T.take 600
-  . T.strip
-
-
--- -------------------------------
--- CodeQuerySearch support (web.run/tool JSON)
--- -------------------------------
-
-newtype CodeQuerySearch = CodeQuerySearch
-  { searchQueryQS :: [QuestionsCQS]
-  }
-  deriving (Show, Generic)
-
-instance Ae.FromJSON CodeQuerySearch where
-  parseJSON = Ae.withObject "CodeQuerySearch" $ \o -> CodeQuerySearch
-    <$> o Ae..: "search_query"
-
-newtype QuestionsCQS = QuestionsCQS
-  { questionQS :: Text
-  }
-  deriving (Show, Generic)
-
-instance Ae.FromJSON QuestionsCQS where
-  parseJSON = Ae.withObject "QuestionsCQS" $ \o -> QuestionsCQS
-    <$> o Ae..: "q"

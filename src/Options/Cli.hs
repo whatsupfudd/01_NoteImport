@@ -236,7 +236,7 @@ oaiJsonOpts =
 oaiTargetsOpts :: Parser TargetsOpts
 oaiTargetsOpts =
   TargetsOpts <$>
-    some (strOption (long "target" <> short 't' <> help "A target to summarize." <> metavar "TARGET"))
+    many (strOption (long "target" <> short 't' <> help "A target to summarize." <> metavar "TARGET"))
     <*> optional (strOption (long "group" <> short 'g' <> help "The group of discussions to select." <> metavar "GROUP"))
 
 oaiGenOpts :: Parser OaiGenOpts

@@ -1,6 +1,6 @@
-{-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use camelCase" #-}
+
 module OpenAI.Conversation where
 
 import Control.Monad (forM)

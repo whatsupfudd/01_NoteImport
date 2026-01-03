@@ -62,56 +62,70 @@ fetchAllConversations pool = do
 --   * Left err       => DB error or unexpected schema inconsistency
 getConversationByEid :: Hp.Pool -> Text -> IO (Either Hp.UsageError (Either String (Maybe Cv.ConversationDb)))
 getConversationByEid pool targetEid = do
-  eiMbDisc <- Hp.use pool $ Ses.statement targetEid selectDiscussionByEid
+  eiMbDisc <- Hp.use pool $ Ses.statement targetEid selectConversationByEid
   case eiMbDisc of
     Left err -> pure (Left err)
     Right Nothing -> pure (Right $ Right Nothing)
-    Right (Just discRow@(discUid, title, eid, ct, ut)) -> do
-      runExceptT $ do
-        nodeRows <- runStmt pool selectNodes discUid
-        msgRows  <- runStmt pool selectMessagesWithAuthor discUid
+    Right (Just discRow) -> getConversationBody pool discRow
 
-        contentRows <- runStmt pool selectContents discUid
 
-        -- Specialised contents
-        codeRows   <- runStmt pool selectCodeContents discUid
-        execRows   <- runStmt pool selectExecutionOutputContents discUid
-        mecRows    <- runStmt pool selectModelEditableContextContents discUid
-        rrcRows    <- runStmt pool selectReasoningRecapContents discUid
-        sesRows    <- runStmt pool selectSystemErrorContents discUid
-        tbdRows    <- runStmt pool selectTetherBrowsingDisplayContents discUid
-        tqRows     <- runStmt pool selectTetherQuoteContents discUid
-        txtRows    <- runStmt pool selectTextContents discUid
-        thHdrRows  <- runStmt pool selectThoughtsContents discUid
-        thRows     <- runStmt pool selectThoughts discUid
-        unkRows    <- runStmt pool selectUnknownContents discUid
+getConversationByUid :: Hp.Pool -> Int64 -> IO (Either Hp.UsageError (Either String (Maybe Cv.ConversationDb)))
+getConversationByUid pool uid = do
+  eiMbDisc <- Hp.use pool $ Ses.statement uid selectConversationByUid
+  case eiMbDisc of
+    Left err -> pure (Left err)
+    Right Nothing -> pure (Right $ Right Nothing)
+    Right (Just discRow) -> getConversationBody pool discRow
 
-        -- Multimodal
-        mmPartRows   <- runStmt pool selectMultiModalParts discUid
-        mmTextRows   <- runStmt pool selectTextMmParts discUid
-        mmAtRows     <- runStmt pool selectAudioTranscriptionMmParts discUid
 
-        mmImgPtrRows <- runStmt pool selectImageAssetPointerMmParts discUid
-        mmImgMdRows  <- runStmt pool selectImageAssetMetadatas discUid
-        mmDalleRows  <- runStmt pool selectDalles discUid
-        mmGenRows    <- runStmt pool selectGenerations discUid
+getConversationBody :: Hp.Pool -> ConversationRow -> IO (Either Hp.UsageError (Either String (Maybe Cv.ConversationDb)))
+getConversationBody pool discRow@(discUid, title, eid, ct, ut) = do
+  runExceptT $ do
+    nodeRows <- runStmt pool selectNodes discUid
+    msgRows  <- runStmt pool selectMessagesWithAuthor discUid
 
-        mmAapRows     <- runStmt pool selectAudioAssetPointerMmParts discUid
-        mmAapMetaRows <- runStmt pool selectAudioMetadataForAap discUid
+    contentRows <- runStmt pool selectContents discUid
 
-        mmRtuavRows     <- runStmt pool selectRealTimeUserAVMmParts discUid
-        mmRtuavMetaRows <- runStmt pool selectAudioMetadataForRtuav discUid
+    -- Specialised contents
+    codeRows   <- runStmt pool selectCodeContents discUid
+    execRows   <- runStmt pool selectExecutionOutputContents discUid
+    mecRows    <- runStmt pool selectModelEditableContextContents discUid
+    rrcRows    <- runStmt pool selectReasoningRecapContents discUid
+    sesRows    <- runStmt pool selectSystemErrorContents discUid
+    tbdRows    <- runStmt pool selectTetherBrowsingDisplayContents discUid
+    tqRows     <- runStmt pool selectTetherQuoteContents discUid
+    txtRows    <- runStmt pool selectTextContents discUid
+    thHdrRows  <- runStmt pool selectThoughtsContents discUid
+    thRows     <- runStmt pool selectThoughts discUid
+    unkRows    <- runStmt pool selectUnknownContents discUid
 
-        pure $ Just <$> buildConversationDb
-            discRow
-            nodeRows
-            msgRows
-            contentRows
-            codeRows execRows mecRows rrcRows sesRows tbdRows tqRows txtRows thHdrRows thRows unkRows
-            mmPartRows mmTextRows mmAtRows
-            mmImgPtrRows mmImgMdRows mmDalleRows mmGenRows
-            mmAapRows mmAapMetaRows
-            mmRtuavRows mmRtuavMetaRows
+    -- Multimodal
+    mmPartRows   <- runStmt pool selectMultiModalParts discUid
+    mmTextRows   <- runStmt pool selectTextMmParts discUid
+    mmAtRows     <- runStmt pool selectAudioTranscriptionMmParts discUid
+
+    mmImgPtrRows <- runStmt pool selectImageAssetPointerMmParts discUid
+    mmImgMdRows  <- runStmt pool selectImageAssetMetadatas discUid
+    mmDalleRows  <- runStmt pool selectDalles discUid
+    mmGenRows    <- runStmt pool selectGenerations discUid
+
+    mmAapRows     <- runStmt pool selectAudioAssetPointerMmParts discUid
+    mmAapMetaRows <- runStmt pool selectAudioMetadataForAap discUid
+
+    mmRtuavRows     <- runStmt pool selectRealTimeUserAVMmParts discUid
+    mmRtuavMetaRows <- runStmt pool selectAudioMetadataForRtuav discUid
+
+    pure $ Just <$> buildConversationDb
+        discRow
+        nodeRows
+        msgRows
+        contentRows
+        codeRows execRows mecRows rrcRows sesRows tbdRows tqRows txtRows thHdrRows thRows unkRows
+        mmPartRows mmTextRows mmAtRows
+        mmImgPtrRows mmImgMdRows mmDalleRows mmGenRows
+        mmAapRows mmAapMetaRows
+        mmRtuavRows mmRtuavMetaRows
+
 
 -- -----------------------------
 -- Orchestration helpers
@@ -139,7 +153,7 @@ liftEither = either throwE pure
 -- -----------------------------
 
 buildConversationDb
-  :: DiscussionRow
+  :: ConversationRow
   -> Vector NodeRow
   -> Vector MessageRow
   -> Vector ContentRow

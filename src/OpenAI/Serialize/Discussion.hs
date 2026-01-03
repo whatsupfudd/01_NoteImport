@@ -17,6 +17,7 @@ import qualified Data.Text as T
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.Time (UTCTime)
 import Data.UUID (UUID)
+import qualified Data.UUID as Uu
 import qualified Data.Vector as V
 import Data.Vector (Vector)
 
@@ -25,7 +26,7 @@ import qualified Data.Aeson as Ae
 
 import qualified Hasql.Pool as Hp
 import qualified Hasql.Session as Ses
-import qualified OpenAI.Serialize.Statements as St
+import qualified OpenAI.Serialize.DiscussionStmt as St
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Tx
 
@@ -59,46 +60,49 @@ useTx pool stmts = Hp.use pool (Tx.transaction Tx.ReadCommitted Tx.Write stmts) 
 -- Any failure rolls back the entire insert.
 storeDiscussion :: Hp.Pool -> Text -> Text -> Context -> IO (Either String (Int64, UUID))
 storeDiscussion pool title convId ctx = do
-  r <- Hp.use pool $
-    Tx.transaction Tx.ReadCommitted Tx.Write $ do
-      (ctxUid, ctxUuid) <- Tx.statement (title, convId) St.insertContext
+  case Uu.fromString $ T.unpack convId of
+    Nothing -> pure . Left $ "@storeDiscussion] invalid UUID: " <> T.unpack convId
+    Just oaiid -> do
+      r <- Hp.use pool $
+        Tx.transaction Tx.ReadCommitted Tx.Write $ do
+          (ctxUid, ctxUuid) <- Tx.statement (title, oaiid) St.insertDiscussion
 
-      -- issues :: [Text]
-      forM_ (zip [1 :: Int32 ..] ctx.issues) $ \(i, t) ->
-        Tx.statement (ctxUid, i, t) St.insertContextIssue
+          -- issues :: [Text]
+          forM_ (zip [1 :: Int32 ..] ctx.issues) $ \(i, t) ->
+            Tx.statement (ctxUid, i, t) St.insertDiscussionIssue
 
-      -- messages :: [MessageFsm]
-      inserted <- forM (zip [1 :: Int32 ..] (reverse ctx.messages)) $ \(i, m) -> do
-        let (kindTxt, createdTs, updatedTs) = messageHeaderData m
-        msgUid <- Tx.statement (ctxUid, i, kindTxt, createdTs, updatedTs) St.insertMessage
+          -- messages :: [MessageFsm]
+          inserted <- forM (zip [1 :: Int32 ..] (reverse ctx.messages)) $ \(i, m) -> do
+            let (kindTxt, createdTs, updatedTs) = messageHeaderData m
+            msgUid <- Tx.statement (ctxUid, i, kindTxt, createdTs, updatedTs) St.insertMessage
 
-        case m of
-          UserMF _ um -> do
-            Tx.statement (msgUid, um.textUM) St.insertUserMessage
-            addAttachments msgUid um.attachmentsUM
+            case m of
+              UserMF _ um -> do
+                Tx.statement (msgUid, um.textUM) St.insertUserMessage
+                addAttachments msgUid um.attachmentsUM
 
-          AssistantMF _ am -> do
-            respUid <- case response am of
-              Nothing -> pure Nothing
-              Just (ResponseAst txt) -> Just <$> Tx.statement txt St.insertResponseAst
+              AssistantMF _ am -> do
+                respUid <- case response am of
+                  Nothing -> pure Nothing
+                  Just (ResponseAst txt) -> Just <$> Tx.statement txt St.insertResponseAst
 
-            Tx.statement (msgUid, respUid) St.insertAssistantMessage
-            addAttachments msgUid am.attachmentsAM
-            addSubActions msgUid am.subActions
+                Tx.statement (msgUid, respUid) St.insertAssistantMessage
+                addAttachments msgUid am.attachmentsAM
+                addSubActions msgUid am.subActions
 
-          SystemMF _ (SystemMessage txt) ->
-            Tx.statement (msgUid, txt) St.insertSystemMessage
+              SystemMF _ (SystemMessage txt) ->
+                Tx.statement (msgUid, txt) St.insertSystemMessage
 
-          ToolMF _ (ToolMessage txt) ->
-            Tx.statement (msgUid, txt) St.insertToolMessage
+              ToolMF _ (ToolMessage txt) ->
+                Tx.statement (msgUid, txt) St.insertToolMessage
 
-          UnknownMF _ (UnknownMessage txt) ->
-            Tx.statement (msgUid, txt) St.insertUnknownMessage
+              UnknownMF _ (UnknownMessage txt) ->
+                Tx.statement (msgUid, txt) St.insertUnknownMessage
 
-        pure (i, msgUid, messageKey m)
+            pure (i, msgUid, messageKey m)
 
-      pure (ctxUid, ctxUuid)
-  pure $ either (Left . show) Right r
+          pure (ctxUid, ctxUuid)
+      pure $ either (Left . show) Right r
 
 
 addAttachments :: Int64 -> [Text] -> Tx.Transaction ()

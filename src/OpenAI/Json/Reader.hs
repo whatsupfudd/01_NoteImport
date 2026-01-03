@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module OpenAI.Json.Reader where
@@ -33,7 +34,7 @@ data Conversation = Conversation {
   updateTimeCv :: Double,
   mappingCv :: Mp.Map Text Node,
   convIdCv :: Text
-} deriving (Show)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Conversation where
   parseJSON = withObject "Conversation" $ \o ->
@@ -50,7 +51,7 @@ data Node = Node {
   messageNd :: Maybe Message,
   parentNd :: Maybe Text,
   childrenNd :: [Text]
-} deriving (Show)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Node where
   parseJSON = withObject "Node" $ \o -> Node
@@ -72,7 +73,7 @@ data Message = Message {
   metadataMsg :: Mp.Map Text Value,
   recipientMsg :: Text,
   channelMsg :: Maybe Text
-} deriving (Show)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Message where
   parseJSON = withObject "Message" $ \o -> Message
@@ -93,7 +94,7 @@ data Author = Author {
   roleAu :: Text,
   nameAu :: Maybe Text,
   metadataAu :: Mp.Map Text Value
-} deriving (Show)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Author where
   parseJSON = withObject "Author" $ \o -> Author
@@ -162,7 +163,7 @@ data Content =
   | OtherCT {
     contentTypeOc :: Text,
     rawOc :: Mp.Map Text Value
-  } deriving (Show)
+  } deriving (Show, Generic, ToJSON)
 
 instance FromJSON Content where
   parseJSON = withObject "Content" $ \o -> do
@@ -224,7 +225,7 @@ data MultiModalPart =
     , audioAssetPointer :: AudioAssetPointer
     , audioStartTimestampRtuav :: Maybe Double
   }
-  deriving (Show, Generic)
+  deriving (Show, Generic, ToJSON)
 
 
 instance FromJSON MultiModalPart where
@@ -264,7 +265,7 @@ data AudioAssetPointer = AudioAssetPointer {
   formatAap :: Text,
   toolAudioDirectionAap :: Maybe Text,
   metadataAap :: Maybe AudioMetadata
-} deriving (Show, Generic)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON AudioAssetPointer where
   parseJSON = withObject "AudioAssetPointer" $ \o -> AudioAssetPointer
@@ -290,7 +291,7 @@ data ImageMetadata = ImageMetadata {
   assetPointerLinkMd :: Maybe Value,
   watermarkedAssetPointerMd :: Maybe Value,
   isNoAuthPlaceholderMd :: Maybe Value
-} deriving (Show, Generic)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON ImageMetadata where
   parseJSON = withObject "Metadata" $ \o -> ImageMetadata
@@ -316,7 +317,7 @@ data Dalle = Dalle {
   parentGenIdDa :: Maybe Text,
   editOpDa :: Maybe Text,
   serializationTitleDa :: Text
-} deriving (Show, Generic)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Dalle where
   parseJSON = withObject "Dalle" $ \o -> Dalle
@@ -338,7 +339,7 @@ data Generation = Generation {
   transparentBackgroundGe :: Bool,
   serializationTitleGe :: Text,
   orientationGe :: Maybe Text
-} deriving (Show, Generic)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Generation where
   parseJSON = withObject "Generation" $ \o -> Generation
@@ -364,7 +365,7 @@ data AudioMetadata = AudioMetadata {
   wordTranscriptionAm :: Maybe Value,
   startAm :: Double,
   endAm :: Double
-} deriving (Show, Generic)
+} deriving (Show, Generic, ToJSON)
 
 
 instance FromJSON AudioMetadata where
@@ -385,7 +386,7 @@ data Thought = Thought {
   contentTh :: Text,
   chunksTh :: Maybe [Value],
   finishedTh :: Maybe Bool
-} deriving (Show, Generic)
+} deriving (Show, Generic, ToJSON)
 
 instance FromJSON Thought where
   parseJSON = withObject "Thought" $ \o -> Thought

@@ -16,19 +16,11 @@ import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 
 
-fetchAllConversationsRows :: Statement () (Vector (Int64, Text) )
-fetchAllConversationsRows =
-  [TH.vectorStatement|
-    select uid::int8, title::text from oai.conversations
-  |]
-
-
-
 -- -----------------------------
 -- Row types
 -- -----------------------------
 
-type DiscussionRow = (Int64, Text, Text, Double, Double)
+type ConversationRow = (Int64, Text, Text, Double, Double)
 
 type NodeRow = (Int64, Text, Maybe Int64)
 
@@ -108,8 +100,15 @@ type RtuavRow = (Int64, Int64, Maybe Value, Value, Maybe Value, Maybe Double)
 type AudioMetaRow = (Int64, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Double, Double)
 
 
-selectDiscussionByEid :: Statement Text (Maybe DiscussionRow)
-selectDiscussionByEid =
+fetchAllConversationsRows :: Statement () (Vector (Int64, Text) )
+fetchAllConversationsRows =
+  [TH.vectorStatement|
+    select uid::int8, title::text from oai.conversations
+  |]
+
+
+selectConversationByEid :: Statement Text (Maybe ConversationRow)
+selectConversationByEid =
   [TH.maybeStatement|
     select
       d.uid :: int8,
@@ -121,6 +120,21 @@ selectDiscussionByEid =
     where d.eid = $1 :: text
   |]
 
+
+selectConversationByUid :: Statement Int64 (Maybe ConversationRow)
+selectConversationByUid =
+  [TH.maybeStatement|
+    select
+      d.uid :: int8,
+      d.title :: text,
+      d.eid :: text,
+      d.create_time :: float8,
+      d.update_time :: float8
+    from oai.conversations d
+    where d.uid = $1 :: int8
+  |]
+
+
 selectNodes :: Statement Int64 (Vector NodeRow)
 selectNodes =
   [TH.vectorStatement|
@@ -130,7 +144,7 @@ selectNodes =
       n.parent_fk :: int8?
     from oai.nodes n
     where n.conversation_fk = $1 :: int8
-    order by n.uid
+    order by n.seqnbr
   |]
 
 selectMessagesWithAuthor :: Statement Int64 (Vector MessageRow)
@@ -156,7 +170,7 @@ selectMessagesWithAuthor =
       join oai.messages m on m.node_fk = n.uid
       join oai.authors a on a.message_fk = m.uid
     where n.conversation_fk = $1 :: int8
-    order by n.uid
+    order by n.seqnbr
   |]
 
 selectContents :: Statement Int64 (Vector ContentRow)
@@ -170,7 +184,7 @@ selectContents =
       join oai.messages m on m.uid = c.message_fk
       join oai.nodes n on n.uid = m.node_fk
     where n.conversation_fk = $1 :: int8
-    order by c.message_fk, c.uid
+    order by c.message_fk, c.seqnbr
   |]
 
 selectCodeContents :: Statement Int64 (Vector CodeRow)
@@ -327,7 +341,7 @@ selectThoughts =
       join oai.messages m on m.uid = c.message_fk
       join oai.nodes n on n.uid = m.node_fk
     where n.conversation_fk = $1 :: int8
-    order by c.message_fk, c.uid, t.uid
+    order by c.message_fk, n.seqnbr, m.seqnbr, c.seqnbr, t.seqnbr
   |]
 
 selectUnknownContents :: Statement Int64 (Vector UnknownRow)
@@ -358,7 +372,7 @@ selectMultiModalParts =
       join oai.messages m on m.uid = c.message_fk
       join oai.nodes n on n.uid = m.node_fk
     where n.conversation_fk = $1 :: int8
-    order by mp.content_fk, mp.uid
+    order by mp.content_fk, mp.seqnbr
   |]
 
 selectTextMmParts :: Statement Int64 (Vector MmTextRow)
@@ -574,4 +588,36 @@ selectAudioMetadataForRtuav =
     where n.conversation_fk = $1 :: int8
       and ma.part_kind = 2
     order by mp.content_fk, mp.uid
+  |]
+
+-- Incremental update statements:
+
+selectConversationForUpdate :: Statement UUID (Maybe (Int64, Text, UTCTime))
+selectConversationForUpdate =
+  [TH.maybeStatement|
+    select
+      uid :: int8,
+      title :: text,
+      update_time :: timestamptz
+    from oai.conversations
+    where eid = $1 :: uuid
+    for update
+  |]
+
+
+selectMaxNodeSeq :: Statement Int64 Int32
+selectMaxNodeSeq =
+  [TH.singletonStatement|
+    select coalesce(max(seqnbr), -1) :: int4
+    from oai.nodes
+    where conversation_fk = $1 :: int8
+  |]
+
+selectNodeUidBySeq :: Statement (Int64, Int32) (Maybe Int64)
+selectNodeUidBySeq =
+  [TH.maybeStatement|
+    select uid :: int8
+    from oai.nodes
+    where conversation_fk = $1 :: int8
+      and seqnbr = $2 :: int4
   |]

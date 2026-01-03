@@ -25,7 +25,7 @@ import qualified Data.Aeson as Ae
 
 import qualified Hasql.Pool as Hp
 import qualified Hasql.Session as Ses
-import qualified OpenAI.Serialize.Statements as St
+import qualified OpenAI.Serialize.ConversationStmt as St
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Tx
 
@@ -48,7 +48,7 @@ addConversation pool conversation = do
     case mbRootNode of
       Nothing -> pure . Left $ "@[addConversation] no root node found"
       Just rootNode -> do
-        eiTreeRez <- addNodeTreeSession conversationID conversation.mappingCv rootNode.idNd Nothing
+        eiTreeRez <- addNodeTreeSession conversationID conversation.mappingCv rootNode.idNd Nothing 0
         case eiTreeRez of
           Left err -> pure . Left $ err <> ": " <> T.unpack ("Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv) <> "\n" <> show conversation
           Right () -> pure . Right $ conversationID
@@ -59,38 +59,38 @@ addConversationRoot conversation =
   Tx.statement (conversation.titleCv, conversation.convIdCv, conversation.createTimeCv
         , conversation.updateTimeCv) St.insertConversation
 
-addNodeSession :: Int64 -> Maybe Int64 -> Text -> Node -> Tx.Transaction Int64
-addNodeSession discussionID mbParentID node_id node = do
-  nuid <- Tx.statement (discussionID, node_id, mbParentID) St.insertNodeStmt
+addNode :: Int64 -> Maybe Int64 -> Text -> Node -> Int32 -> Tx.Transaction Int64
+addNode discussionID mbParentID node_id node seqNbr = do
+  nuid <- Tx.statement (discussionID, node_id, mbParentID, seqNbr) St.insertNodeStmt
   when (isJust node.messageNd) $
-    addMessageSession nuid (fromJust node.messageNd)
+    addMessage nuid (fromJust node.messageNd) 0
   pure nuid
 
-addMessageSession :: Int64 -> Message -> Tx.Transaction ()
-addMessageSession node_uid msg = do
+addMessage :: Int64 -> Message -> Int32 -> Tx.Transaction ()
+addMessage node_uid msg seqNbr = do
   muid <- Tx.statement
     (node_uid, msg.idMsg, msg.createTimeMsg, msg.updateTimeMsg, msg.statusMsg
     , msg.endTurnMsg, msg.weightMsg, Ae.toJSON (HM.fromList $ Mp.toList msg.metadataMsg)
     , msg.recipientMsg, msg.channelMsg
+    , seqNbr
     ) St.insertMessageStmt
-  addAuthorSession muid msg.authorMsg
-  addContentSession muid msg.contentMsg
+  addAuthor muid msg.authorMsg
+  addContent muid msg.contentMsg 0
 
 
-addAuthorSession :: Int64 -> Author -> Tx.Transaction ()
-addAuthorSession msg_uid au = Tx.statement
-    (msg_uid, au.roleAu, au.nameAu
-    , Ae.toJSON (HM.fromList $ Mp.toList au.metadataAu)) St.insertAuthorStmt
+addAuthor :: Int64 -> Author -> Tx.Transaction ()
+addAuthor msg_uid au = Tx.statement (msg_uid, au.roleAu, au.nameAu
+          , Ae.toJSON (HM.fromList $ Mp.toList au.metadataAu)) St.insertAuthorStmt
 
 
-addContentSession :: Int64 -> Content -> Tx.Transaction ()
-addContentSession msg_uid content = do
-  cuid <- Tx.statement (msg_uid, contentType content) St.insertContentStmt
+addContent :: Int64 -> Content -> Int32 -> Tx.Transaction ()
+addContent msg_uid content seqNbr = do
+  cuid <- Tx.statement (msg_uid, contentType content, seqNbr) St.insertContentStmt
   case content of
     CodeCT lang rfn txt -> addCodeContentSession cuid lang rfn txt
     ExecutionOutputCT txt -> addExecutionOutputContentSession cuid txt
     ModelEditableContextCT msc rep rs sc -> addModelEditableContextSession cuid msc rep rs sc
-    MultimodalTextCT parts -> forM_ parts (addMultiModalPartSession cuid)
+    MultimodalTextCT parts -> forM_ (zip parts [0..]) $ uncurry (addMultiModalPartSession cuid)
     ReasoningRecapCT cnt -> addReasoningRecapContentSession cuid cnt
     SystemErrorCT name txt -> addSystemErrorContentSession cuid name txt
     TetherBrowsingDisplayCT results summary assets tetherID -> addTetherBrowsingDisplayContentSession cuid results summary assets tetherID
@@ -143,24 +143,24 @@ addTextContentSession cuid parts = Tx.statement (cuid, V.fromList parts) St.inse
 addThoughtsContentSession :: Int64 -> [Thought] -> Text -> Tx.Transaction ()
 addThoughtsContentSession cuid ths sam = do
   Tx.statement (cuid, sam) St.insertThoughtsContentStmt
-  forM_ ths $ \th -> addThoughtSession cuid th
+  forM_ (zip ths [0..]) $ uncurry (addThought cuid)
 
-addThoughtSession :: Int64 -> Thought -> Tx.Transaction ()
-addThoughtSession tc_uid th = Tx.statement
-    (tc_uid, th.summaryTh, th.contentTh, Ae.toJSON th.chunksTh, fromMaybe False th.finishedTh) St.insertThoughtStmt
+addThought :: Int64 -> Thought -> Int32 -> Tx.Transaction ()
+addThought tc_uid th seqNbr = Tx.statement
+    (tc_uid, th.summaryTh, th.contentTh, Ae.toJSON th.chunksTh, fromMaybe False th.finishedTh, seqNbr) St.insertThoughtStmt
 
 
 -- Recursive node tree insertion
-addNodeTreeSession :: Int64 -> Mp.Map Text Node -> Text -> Maybe Int64 -> Tx.Transaction (Either String ())
-addNodeTreeSession discussionID mapping nodeEid mbParentID =
+addNodeTreeSession :: Int64 -> Mp.Map Text Node -> Text -> Maybe Int64 -> Int32 -> Tx.Transaction (Either String ())
+addNodeTreeSession discussionID mapping nodeEid mbParentID seqNbr =
   let
     mbNode =  Mp.lookup nodeEid mapping
   in do
   case mbNode of
     Just aNode -> do
-      nuid <- addNodeSession discussionID mbParentID nodeEid aNode
+      nuid <- addNode discussionID mbParentID nodeEid aNode seqNbr
       forM_ aNode.childrenNd $ \child_id ->
-        addNodeTreeSession discussionID mapping child_id (Just nuid)
+        addNodeTreeSession discussionID mapping child_id (Just nuid) (seqNbr + 1)
       pure $ Right ()
     Nothing -> pure . Left $ "@[addNodeTreeSession] node not found: " <> show nodeEid
 
@@ -175,9 +175,9 @@ assetPointerPap :: String,
     foveaPap :: Maybe Value,
     metadataPap :: Metadata
 -}
-addMultiModalPartSession :: Int64 -> MultiModalPart -> Tx.Transaction ()
-addMultiModalPartSession contentID part = do
-  partID <- Tx.statement (contentID, mmPartContentType part) St.insertMultiModalPartStmt
+addMultiModalPartSession :: Int64 -> MultiModalPart -> Int32 -> Tx.Transaction ()
+addMultiModalPartSession contentID part seqNbr = do
+  partID <- Tx.statement (contentID, mmPartContentType part, seqNbr) St.insertMultiModalPartStmt
   case part of
     AudioTranscriptionPT text direction decodingId ->
       Tx.statement (partID, text, direction, decodingId) St.insertAudioTranscriptionMMPartStmt
@@ -195,7 +195,7 @@ addMultiModalPartSession contentID part = do
       case metadata of
         Just metadata -> addImageMetadataSession imgPartID metadata
         Nothing -> return ()
-    RealTimeUserAVPT expiryDatetime framesAssetPointers videoContainerAssetPointer audioAssetPointer audioStartTimestamp -> 
+    RealTimeUserAVPT expiryDatetime framesAssetPointers videoContainerAssetPointer audioAssetPointer audioStartTimestamp ->
       let
         framePtrValues = if null framesAssetPointers then Nothing else Just (Ae.toJSON framesAssetPointers)
       in do

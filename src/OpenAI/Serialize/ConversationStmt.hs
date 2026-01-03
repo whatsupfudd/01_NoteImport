@@ -1,7 +1,8 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Serialize.Statements where
+module OpenAI.Serialize.ConversationStmt where
 
+import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Int (Int32, Int64)
 import Data.UUID (UUID)
@@ -10,6 +11,7 @@ import qualified Data.Vector as V
 import Data.Vector (Vector)
 
 import qualified Data.Aeson as Ae
+import Data.Aeson (Value)
 import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 
@@ -25,24 +27,24 @@ insertConversation =
   |]
 
 
-insertNodeStmt :: Statement (Int64, Text, Maybe Int64) Int64
+insertNodeStmt :: Statement (Int64, Text, Maybe Int64, Int32) Int64
 insertNodeStmt =
   [TH.singletonStatement|
     insert into oai.nodes
-      (conversation_fk, eid, parent_fk)
+      (conversation_fk, eid, parent_fk, seqnbr)
     values
-      ($1 :: int8, $2 :: text, $3 :: int8?)
+      ($1 :: int8, $2 :: text, $3 :: int8?, $4 :: int4)
     returning uid :: int8
   |]
 
 
-insertMessageStmt :: Statement (Int64, Text, Maybe Double, Maybe Double, Text, Maybe Bool, Double, Ae.Value, Text, Maybe Text) Int64
+insertMessageStmt :: Statement (Int64, Text, Maybe Double, Maybe Double, Text, Maybe Bool, Double, Ae.Value, Text, Maybe Text, Int32) Int64
 insertMessageStmt =
   [TH.singletonStatement|
     insert into oai.messages
-      (node_fk, eid, create_time, update_time, status, end_turn, weight, metadata, recipient, channel)
+      (node_fk, eid, create_time, update_time, status, end_turn, weight, metadata, recipient, channel, seqnbr)
     values
-      ($1 :: int8, $2 :: text, $3 :: float8?, $4 :: float8?, $5 :: text, $6 :: bool?, $7 :: float8, $8 :: jsonb, $9 :: text, $10 :: text?)
+      ($1 :: int8, $2 :: text, $3 :: float8?, $4 :: float8?, $5 :: text, $6 :: bool?, $7 :: float8, $8 :: jsonb, $9 :: text, $10 :: text?, $11 :: int4)
     returning uid :: int8
   |]
 
@@ -55,13 +57,13 @@ insertAuthorStmt =
       ($1 :: int8, $2 :: text, $3 :: text?, $4 :: jsonb)
   |]
 
-insertContentStmt :: Statement (Int64, Text) Int64
+insertContentStmt :: Statement (Int64, Text, Int32) Int64
 insertContentStmt =
   [TH.singletonStatement|
     insert into oai.contents
-      (message_fk, content_type)
+      (message_fk, content_type, seqnbr)
     values
-      ($1 :: int8, $2 :: text)
+      ($1 :: int8, $2 :: text, $3 :: int4)
     returning uid :: int8
   |]
 
@@ -148,25 +150,25 @@ insertThoughtsContentStmt =
       ($1 :: int8, $2 :: text)
   |]
 
-insertThoughtStmt :: Statement (Int64, Text, Text, Ae.Value, Bool) ()
+insertThoughtStmt :: Statement (Int64, Text, Text, Ae.Value, Bool, Int32) ()
 insertThoughtStmt =
   [TH.resultlessStatement|
     insert into oai.thoughts
-      (thoughts_content_fk, summary, content, chunks, finished)
+      (thoughts_content_fk, summary, content, chunks, finished, seqnbr)
     values
-      ($1 :: int8, $2 :: text, $3 :: text, $4 :: jsonb, $5 :: bool)
+      ($1 :: int8, $2 :: text, $3 :: text, $4 :: jsonb, $5 :: bool, $6 :: int4)
   |]
 
 
 -- New TH statements for multimodal_text
 
-insertMultiModalPartStmt :: Statement (Int64, Text) Int64
+insertMultiModalPartStmt :: Statement (Int64, Text, Int32) Int64
 insertMultiModalPartStmt =
   [TH.singletonStatement|
     insert into oai.multimodal_parts
-      (content_fk, content_type)
+      (content_fk, content_type, seqnbr)
     values
-      ($1 :: int8, $2 :: text)
+      ($1 :: int8, $2 :: text, $3 :: int4)
     returning uid :: int8
   |]
 
@@ -274,127 +276,151 @@ insertRealTimeUserAVMMPartStmt =
   |]
 
 
---- Discussion Context serialisation:
-insertContext :: Statement (Text, Text) (Int64, UUID)
-insertContext =
+insertConversationIngest :: Statement (Int64, Maybe Text, Maybe ByteString, Text) ()
+insertConversationIngest =
   [TH.singletonStatement|
-    insert into oai.discourse
-      (title, conversation_eid)
+    insert into oai.conversation_ingest
+      (conversation_fk, source_key, source_sha256, ingest_type)
     values
-      ($1 :: text, $2 :: text)
-    returning uid :: int8, uuid :: uuid
+      ($1 :: int8, $2 :: text?, $3 :: bytea?, $4 :: text)
+    on conflict (conversation_fk, source_sha256) do nothing
   |]
 
-insertContextIssue :: Statement (Int64, Int32, Text) ()
-insertContextIssue =
-  [TH.resultlessStatement|
-    insert into oai.discourse_issue (context_fk, seq, text)
-    values ($1 :: int8, $2 :: int4, $3 :: text)
-  |]
+-- Incremental update statements:
 
-insertMessage :: Statement (Int64, Int32, Text, Maybe UTCTime, Maybe UTCTime) Int64
-insertMessage =
+insertConversationPrevious :: Statement (Int64, UTCTime, Text) ()
+insertConversationPrevious =
   [TH.singletonStatement|
-    insert into oai.messagefsm (discourse_fk, seq, kind, created_at, updated_at)
-    values (
-      $1 :: int8,
-      $2 :: int4,
-      ($3 :: text)::oai.message_kind,
-      $4 :: timestamptz?,
-      $5 :: timestamptz?
-    )
+    insert into oai.conversation_previous (conversation_fk, update_time, title)
+    values ($1 :: int8, $2 :: timestamptz, $3 :: text)
+    on conflict (conversation_fk, update_time) do nothing
+  |]
+
+updateConversation :: Statement (Text, UTCTime, Int64) ()
+updateConversation =
+  [TH.singletonStatement|
+    update oai.conversations
+    set
+      title = $1 :: text,
+      update_time = $2 :: timestamptz
+    where uid = $3 :: int8
+  |]
+
+
+insertNodeRetUid :: Statement (Int64, UUID, Maybe Int64, Int32) Int64
+insertNodeRetUid =
+  [TH.singletonStatement|
+    insert into oai.nodes (conversation_fk, eid, parent_fk, seqnbr)
+    values ($1 :: int8, $2 :: uuid, $3 :: int8?, $4 :: int4)
     returning uid :: int8
   |]
 
-
-insertUserMessage :: Statement (Int64, Text) ()
-insertUserMessage =
-  [TH.resultlessStatement|
-    insert into oai.user_message (message_fk, text)
-    values ($1 :: int8, $2 :: text)
-  |]
-
-insertResponseAst :: Statement Text Int64
-insertResponseAst =
+insertMessageRetUid :: Statement (Int64, Text, UTCTime, UTCTime, Text, Maybe Bool, Double, Value, Text, Maybe Text, Int32) Int64
+insertMessageRetUid =
   [TH.singletonStatement|
-    insert into oai.response_ast (text)
-    values ($1 :: text)
+    insert into oai.messages
+      (node_fk, eid, create_time, update_time, status, end_turn, weight, metadata, recipient, channel, seqnbr)
+    values
+      ($1 :: int8, $2 :: text, $3 :: timestamptz, $4 :: timestamptz, $5 :: text,
+       $6 :: bool?, $7 :: float8, $8 :: jsonb, $9 :: text, $10 :: text?, $11 :: int4)
     returning uid :: int8
   |]
 
-insertAssistantMessage :: Statement (Int64, Maybe Int64) ()
-insertAssistantMessage =
-  [TH.resultlessStatement|
-    insert into oai.assistant_message (message_fk, response_fk)
-    values ($1 :: int8, $2 :: int8?)
-  |]
-
-insertSystemMessage :: Statement (Int64, Text) ()
-insertSystemMessage =
-  [TH.resultlessStatement|
-    insert into oai.system_message (message_fk, text)
-    values ($1 :: int8, $2 :: text)
-  |]
-
-insertToolMessage :: Statement (Int64, Text) ()
-insertToolMessage =
-  [TH.resultlessStatement|
-    insert into oai.tool_message (message_fk, text)
-    values ($1 :: int8, $2 :: text)
-  |]
-
-insertUnknownMessage :: Statement (Int64, Text) ()
-insertUnknownMessage =
-  [TH.resultlessStatement|
-    insert into oai.unknown_message (message_fk, text)
-    values ($1 :: int8, $2 :: text)
-  |]
-
-insertAttachment :: Statement (Int64, Int32, Text) ()
-insertAttachment =
-  [TH.resultlessStatement|
-    insert into oai.message_attachment (message_fk, seq, value)
-    values ($1 :: int8, $2 :: int4, $3 :: text)
-  |]
-
-insertSubAction :: Statement (Int64, Int32, Text, Maybe Text) Int64
-insertSubAction =
+insertAuthor :: Statement (Int64, Text, Maybe Text, Value) ()
+insertAuthor =
   [TH.singletonStatement|
-    insert into oai.sub_action (message_fk, seq, kind, text)
-    values (
-      $1 :: int8,
-      $2 :: int4,
-      ($3 :: text)::oai.sub_action_kind,
-      $4 :: text?
-    )
+    insert into oai.authors (message_fk, role, name, metadata)
+    values ($1 :: int8, $2 :: text, $3 :: text?, $4 :: jsonb)
+  |]
+
+insertContentRetUid :: Statement (Int64, Text, Int32) Int64
+insertContentRetUid =
+  [TH.singletonStatement|
+    insert into oai.contents (message_fk, content_type, seqnbr)
+    values ($1 :: int8, $2 :: text, $3 :: int4)
     returning uid :: int8
   |]
 
-insertReflection :: Statement (Int64, Text, Text, Maybe Bool) Int64
-insertReflection =
+insertCodeContent :: Statement (Int64, Text, Maybe Text, Text) ()
+insertCodeContent =
   [TH.singletonStatement|
-    insert into oai.reflection (sub_action_fk, summary, content, finished)
-    values ($1 :: int8, $2 :: text, $3 :: text, $4 :: bool?)
-    returning uid :: int8
-  |]
-
-insertReflectionChunk :: Statement (Int64, Int32, Text) ()
-insertReflectionChunk =
-  [TH.resultlessStatement|
-    insert into oai.reflection_chunk (reflection_fk, seq, text)
-    values ($1 :: int8, $2 :: int4, $3 :: text)
-  |]
-
-insertCode :: Statement (Int64, Text, Maybe Text, Text) ()
-insertCode =
-  [TH.resultlessStatement|
-    insert into oai.code (sub_action_fk, language, format_name, text)
+    insert into oai.code_contents (content_fk, language, response_format_name, text)
     values ($1 :: int8, $2 :: text, $3 :: text?, $4 :: text)
   |]
 
-insertToolCall :: Statement (Int64, Text, Text) ()
-insertToolCall =
-  [TH.resultlessStatement|
-    insert into oai.tool_call (sub_action_fk, tool_name, tool_input)
+insertExecutionOutputContent :: Statement (Int64, Text) ()
+insertExecutionOutputContent =
+  [TH.singletonStatement|
+    insert into oai.execution_output_contents (content_fk, text)
+    values ($1 :: int8, $2 :: text)
+  |]
+
+insertModelEditableContextContent :: Statement (Int64, Text, Maybe Value, Maybe Value, Maybe Value) ()
+insertModelEditableContextContent =
+  [TH.singletonStatement|
+    insert into oai.model_editable_context_contents
+      (content_fk, model_set_context, repository, repo_summary, structured_context)
+    values
+      ($1 :: int8, $2 :: text, $3 :: jsonb?, $4 :: jsonb?, $5 :: jsonb?)
+  |]
+
+insertReasoningRecapContent :: Statement (Int64, Text) ()
+insertReasoningRecapContent =
+  [TH.singletonStatement|
+    insert into oai.reasoning_recap_contents (content_fk, content)
+    values ($1 :: int8, $2 :: text)
+  |]
+
+insertSystemErrorContent :: Statement (Int64, Text, Text) ()
+insertSystemErrorContent =
+  [TH.singletonStatement|
+    insert into oai.system_error_contents (content_fk, name, text)
     values ($1 :: int8, $2 :: text, $3 :: text)
+  |]
+
+insertTetherBrowsingDisplayContent :: Statement (Int64, Text, Maybe Text, Maybe Value, Maybe Text) ()
+insertTetherBrowsingDisplayContent =
+  [TH.singletonStatement|
+    insert into oai.tether_browsing_display_contents
+      (content_fk, results, summary, assets, tether_id)
+    values ($1 :: int8, $2 :: text, $3 :: text?, $4 :: jsonb?, $5 :: text?)
+  |]
+
+insertTetherQuoteContent :: Statement (Int64, Text, Text, Text, Text, Maybe Text) ()
+insertTetherQuoteContent =
+  [TH.singletonStatement|
+    insert into oai.tether_quote_contents
+      (content_fk, url, domain, text, title, tether_id)
+    values ($1 :: int8, $2 :: text, $3 :: text, $4 :: text, $5 :: text, $6 :: text?)
+  |]
+
+insertTextContent :: Statement (Int64, V.Vector Text) ()
+insertTextContent =
+  [TH.singletonStatement|
+    insert into oai.text_contents (content_fk, parts)
+    values ($1 :: int8, $2 :: text[])
+  |]
+
+insertThoughtsContent :: Statement (Int64, Text) ()
+insertThoughtsContent =
+  [TH.singletonStatement|
+    insert into oai.thoughts_contents (content_fk, source_analysis_msg_id)
+    values ($1 :: int8, $2 :: text)
+  |]
+
+insertThought :: Statement (Int64, Text, Text, Value, Bool, Int32) ()
+insertThought =
+  [TH.singletonStatement|
+    insert into oai.thoughts
+      (thoughts_content_fk, summary, content, chunks, finished, seqnbr)
+    values ($1 :: int8, $2 :: text, $3 :: text, $4 :: jsonb, $5 :: bool, $6 :: int4)
+  |]
+
+-- NOTE: column was created as "opaqueValue" in the DDL snippet, but unquoted identifiers
+-- are folded to lowercase. Adjust to your actual column name if you quoted it.
+insertUnknownContent :: Statement (Int64, Value) ()
+insertUnknownContent =
+  [TH.singletonStatement|
+    insert into oai.unknown_contents (content_fk, opaquevalue)
+    values ($1 :: int8, $2 :: jsonb)
   |]

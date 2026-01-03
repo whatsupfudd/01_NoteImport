@@ -14,37 +14,30 @@ import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 
 
-fetchAllConversations :: Statement () (Vector (Int64, Text) )
-fetchAllConversations =
-  [TH.vectorStatement|
-    select uid::int8, title::text from oai.conversations
-  |]
-
-
 -- Deserialisation of Discussion:
-selectDiscussionByUuid :: Statement UUID (Maybe (Int64, UUID, Text, Text))
+selectDiscussionByUuid :: Statement UUID (Maybe (Int64, UUID, Text, UUID))
 selectDiscussionByUuid =
   [TH.maybeStatement|
     select
       uid :: int8
       , uuid :: uuid
       , title :: text
-      , conversation_eid :: text
+      , oaiid :: uuid
     from oai.discussion
     where uuid = $1 :: uuid
   |]
 
 
-selectDiscussionByConvId :: Statement Text (Maybe (Int64, UUID, Text, Text))
+selectDiscussionByConvId :: Statement UUID (Maybe (Int64, UUID, Text, UUID))
 selectDiscussionByConvId =
   [TH.maybeStatement|
     select
       uid :: int8
       , uuid :: uuid
       , title :: text
-      , conversation_eid :: text
+      , oaiid :: uuid
     from oai.discussion
-    where conversation_eid = $1 :: text
+    where oaiid = $1 :: uuid
   |]
 
 
@@ -201,7 +194,7 @@ selectCodes =
       c.language :: text,
       c.format_name :: text?,
       c.text :: text
-    from oai.code c
+    from oai.code_block c
       join oai.sub_action sa on sa.uid = c.sub_action_fk
       join oai.messagefsm m on m.uid = sa.message_fk
     where m.discussion_fk = $1 :: int8
