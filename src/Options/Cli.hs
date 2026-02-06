@@ -243,7 +243,7 @@ oaiGenOpts :: Parser OaiGenOpts
 oaiGenOpts =
   OaiGenOpts <$>
     strArgument (help "Destination directory." <> metavar "DESTDIR")
-    <*> some (strOption (long "target" <> short 't' <> help "A target to elmify." <> metavar "TARGET"))
+    <*> many (strOption (long "target" <> short 't' <> help "A target to elmify." <> metavar "TARGET"))
     <*> optional (strOption (long "group" <> short 'g' <> help "The group of discussions to select." <> metavar "GROUP"))
 
 oaiProjFetchOpts :: Parser OaiProjFetchOpts

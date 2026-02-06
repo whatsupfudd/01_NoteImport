@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   uid BIGSERIAL PRIMARY KEY
   , title TEXT NOT NULL
   , eid uuid NOT NULL
-  , create_time timestamptzNOT NULL
+  , create_time timestamptz NOT NULL
   , update_time timestamptz NOT NULL
 );
 create unique index if not exists conversations_eid_uq on conversations(eid);
@@ -270,3 +270,20 @@ create table if not exists oai.conversation_previous (
   , title text not null
   , unique (conversation_fk, update_time)
 );
+
+CREATE TABLE IF NOT EXISTS conversation_group (
+  uid BIGSERIAL PRIMARY KEY
+  , parent_fk BIGINT REFERENCES conversation_group(uid) ON DELETE CASCADE
+  , uuid UUID NOT NULL DEFAULT gen_random_uuid()
+  , label TEXT NOT NULL UNIQUE
+);
+
+create table if not exists conversation_group_member (
+  conversation_group_fk BIGINT NOT NULL REFERENCES conversation_group(uid) ON DELETE CASCADE,
+  conversation_fk BIGINT NOT NULL REFERENCES conversations(uid) ON DELETE CASCADE
+  , last_use date
+  , PRIMARY KEY (conversation_group_fk, conversation_fk)
+);
+
+create index if not exists conversation_group_member_cgroup_fk_idx on conversation_group_member (conversation_group_fk);
+create index if not exists conversation_group_member_conversation_fk_idx on conversation_group_member (conversation_fk);

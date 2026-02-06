@@ -157,22 +157,25 @@ data DiscussionDb = DiscussionDb
 -- Public API
 -- -----------------------------
 
+
+allDiscussionsInGroup :: Hp.Pool -> Text -> IO (Either Hp.UsageError (Vector (Int64, Text, UUID)))
+allDiscussionsInGroup pool groupLabel = do
+  rez <- Hp.use pool $ Ses.statement groupLabel St.fetchAllDiscussionsInGroup
+  case rez of
+    Left err -> pure $ Left err
+    Right discussions -> pure $ Right discussions
+
+
 -- | Load a context by its external UUID.
 --
 -- Returns:
 --   * Right Nothing  => context not found
 --   * Right (Just x) => loaded successfully
 --   * Left err       => DB error or unexpected schema inconsistency
-loadDiscussion :: Hp.Pool -> UUID -> IO (Either String (Maybe DiscussionDb))
+loadDiscussion :: Hp.Pool -> UUID -> IO (Either Hp.UsageError (Either String (Maybe DiscussionDb)))
 loadDiscussion pool discourseUuid = do
-  rez <- Hp.use pool $
+  Hp.use pool $
     TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx discourseUuid)
-
-  -- Flatten: Pool.use gives Either UsageError a
-  pure $ case first show rez of
-    Left err -> Left err
-    Right (Left err) -> Left err
-    Right (Right ctx) -> Right ctx
 
 
 findDiscussionByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))
@@ -186,6 +189,16 @@ findDiscussionByConvId pool convId =
         Right Nothing -> pure . Right $ Nothing
         Right (Just (_, ctxUuid, _, _)) ->
           pure . Right $ Just ctxUuid
+
+
+findDiscussionByUid :: Hp.Pool -> Int64 -> IO (Either String (Maybe UUID))
+findDiscussionByUid pool uid = do
+  eiRez <- Hp.use pool $ Ses.statement uid St.selectDiscussionByUid
+  case eiRez of
+    Left err -> pure . Left $ show err
+    Right Nothing -> pure . Right $ Nothing
+    Right (Just (_, ctxUuid, _, _)) ->
+      pure . Right $ Just ctxUuid
 
 
 loadDiscussionTx :: UUID -> Tx.Transaction (Either String (Maybe DiscussionDb))

@@ -53,6 +53,7 @@ import OpenAI.Deserialize.Discussion
   , MessageBodyDb(..)
   , RefDb(..)
   )
+import qualified OpenAI.Utils as Utl
 
 
 -- -------------------------------
@@ -67,7 +68,7 @@ import OpenAI.Deserialize.Discussion
 --   * skips messages that already have a row in message_summary
 --   * on successful summarisation, upserts the DB row
 --   * continues on errors and returns a combined error string at the end
-summarizeDiscourseMessages :: Hp.Pool -> Manager -> DiscussionDb -> IO (Either String ())
+summarizeDiscourseMessages :: Hp.Pool -> Manager -> DiscussionDb -> IO (Either [Hp.UsageError] (Either [String] [()]))
 summarizeDiscourseMessages pool httpManager ctx = do
   let candidates :: [(Int64, Text)]
       candidates =
@@ -78,42 +79,36 @@ summarizeDiscourseMessages pool httpManager ctx = do
         , not (T.null (T.strip txt))
         ]
 
-  if null candidates
-    then pure (Right ())
-    else do
-      -- skip already summarised messages
-      let uidsVec = V.fromList (map fst candidates)
-      existing <- Hp.use pool $
-        TxS.transaction TxS.ReadCommitted TxS.Read (Tx.statement uidsVec selectExistingSummaryMessageFks)
-
-      case first show existing of
-        Left e -> pure (Left e)
-        Right existingFks -> do
-          let doneSet :: Set Int64
-              doneSet = Set.fromList (V.toList existingFks)
-
-          errs <- foldlMIO
-            (\acc (mid, txt) ->
-              if Set.member mid doneSet
-                then pure acc
-                else do
-                  ei <- summarizeMessageOneLine httpManager txt
-                  case ei of
-                    Left err -> pure (acc <> ["[ollama] message_fk=" <> show mid <> ": " <> err])
-                    Right summary -> do
-                      ins <- Hp.use pool $
-                        TxS.transaction TxS.ReadCommitted TxS.Write (Tx.statement (mid, summary) upsertMessageSummary)
-                      case first show ins of
-                        Left e -> pure (acc <> ["[db] message_fk=" <> show mid <> ": " <> e])
-                        Right _ -> pure acc
-            )
-            []
-            candidates
-
-          pure $
-            if null errs
-              then Right ()
-              else Left (unlines errs)
+  if null candidates then 
+      pure $ Right $ Right [()]
+  else do
+    -- skip already summarised messages
+    let
+      uidsVec = V.fromList (map fst candidates)
+    eiExisting <- Hp.use pool $
+      TxS.transaction TxS.ReadCommitted TxS.Read (Tx.statement uidsVec selectExistingSummaryMessageFks)
+    case eiExisting of
+      Left e -> pure $ Left [e]
+      Right existingFks ->
+        let
+          doneSet :: Set Int64
+          doneSet = Set.fromList (V.toList existingFks)
+        in do
+        rezA <- mapM (\(mid, txt) ->
+          if Set.member mid doneSet then
+            pure . Right $ Right ()
+          else do
+            eiSRez <- summarizeMessageOneLine httpManager txt
+            case eiSRez of
+              Left err -> pure . Right . Left $ "@[summarizeDiscourseMessages.ollama] message_fk=" <> show mid <> ": " <> err
+              Right summary -> do
+                rezB <- Hp.use pool $
+                  TxS.transaction TxS.ReadCommitted TxS.Write (Tx.statement (mid, summary) upsertMessageSummary)
+                case rezB of
+                  Left err -> pure $ Left err
+                  Right _ -> pure . Right $ Right ()
+          ) candidates
+        pure $ Utl.listResultsToResultList rezA
 
 
 -- | Summarize a single message's content as a one-line TOC label.
@@ -123,27 +118,32 @@ summarizeMessageOneLine :: Manager -> Text -> IO (Either String Text)
 summarizeMessageOneLine mgr content = do
   req0 <- parseRequest (ollamaBaseUrl <> ollamaGeneratePath)
 
-  let prefix =
-        "As an expert in journalism, editorial reviews, legal affairs, dissertation analysis and information management, you are tasked by management with creating a short title for the following entry in a document that we'll integrate in the table of content:<entry>"
-      postfix =
-        "</entry>. Provide a short one-liner title for this entry, keep it within 20 words, be affirmative and use proper, concise and descriptive English. Don't go into details, don't use markdown."
-      prompt = prefix <> content <> postfix
+  let
+    prefix =
+        "As an expert in journalism, editorial reviews, legal affairs, dissertation analysis and information management,"
+        <> " you are tasked by management with creating a short title for the following entry in a document that we'll integrate in the table of content.\n"
+        <> "Provide a short one-liner title for this entry, keep it within 20 words, be affirmative and use proper,"
+        <> " concise and descriptive English. Don't go into details, don't use markdown, don't quote your answer,"
+        <> " don't mention notes nor that it is a possible title.\n"
+        <> "Example: <entry>The main idea of this section is to optimise the structure of the ecosystem.</entry>\n"
+        <> "Summary: Ecosystem structural optimisation.\n"
+        <> "<entry>"
+    postfix =
+        "</entry>\nSummary:"
 
-      body = Ae.encode (OllamaGenerateReq ollamaModel prompt False)
-
-      req =
-        req0
-          { method = "POST"
-          , requestHeaders = [(hContentType, "application/json")]
-          , requestBody = RequestBodyLBS body
-          , responseTimeout = responseTimeoutMicro (600 * 1000000)
-          }
+    prompt = prefix <> content <> postfix
+    body = Ae.encode (OllamaGenerateReq ollamaModel prompt False)
+    req = req0 { 
+          method = "POST"
+        , requestHeaders = [(hContentType, "application/json")]
+        , requestBody = RequestBodyLBS body
+        , responseTimeout = responseTimeoutMicro (600 * 1000000)
+        }
 
   resp <- httpLbs req mgr
   case Ae.eitherDecode (responseBody resp) of
     Left err -> pure (Left err)
-    Right (OllamaGenerateResp t) ->
-      pure (Right (cleanOneLine t))
+    Right (OllamaGenerateResp t) -> pure . Right $ cleanOneLine t
 
 
 -- -------------------------------

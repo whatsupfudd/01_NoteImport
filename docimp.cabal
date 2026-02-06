@@ -64,6 +64,7 @@ library
       OpenAI.Serialize.IncrUpdate
       OpenAI.Summarisation
       OpenAI.Types
+      OpenAI.Utils
       Options
       Options.Cli
       Options.ConfFile

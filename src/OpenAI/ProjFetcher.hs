@@ -142,7 +142,7 @@ findDiscourseGroupByLabel :: Statement Text (Maybe (Int64, Text, Text))
 findDiscourseGroupByLabel =
   [TH.maybeStatement|
     select uid :: int8, title::text, eid::text
-    from oai.discourse_group where label = $1 :: text
+    from oai.conversation_group where label = $1 :: text
   |]
 
 
@@ -156,7 +156,7 @@ findDiscourseGroupByLabel =
 upsertDiscourseGroup :: Statement Text Int64
 upsertDiscourseGroup =
   [TH.singletonStatement|
-    insert into oai.discourse_group (label)
+    insert into oai.conversation_group (label)
     values ($1::text)
     on conflict (label) do update
       set label = excluded.label
@@ -169,7 +169,7 @@ findConversationByEid :: Statement Text (Maybe Int64)
 findConversationByEid =
   [TH.maybeStatement|
     select uid :: int8
-    from oai.discussions where eid = $1 :: text
+    from oai.conversations where eid = $1 :: text
   |]
 
 
@@ -177,10 +177,10 @@ findConversationByGroupId :: Statement Int64 (V.Vector (Int64, Text, Text))
 findConversationByGroupId =
   [TH.vectorStatement|
     select b.uid :: int8, b.title :: text, b.eid :: text
-    from oai.discourse_group_member a
-      join oai.discussions b on b.discussions_fk = a.uid
+    from oai.conversation_group_member a
+      join oai.conversations b on b.conversation_fk = a.uid
     where
-      discourse_group_fk = $1 :: int8
+      conversation_group_fk = $1 :: int8
   |]
 
 
@@ -188,9 +188,9 @@ findConversationByGroupId =
 insertGroupMember :: Statement (Int64, Int64, Maybe Dt.Day) ()
 insertGroupMember =
   [TH.resultlessStatement|
-    insert into oai.discourse_group_member (discourse_group_fk, discussions_fk, last_use)
+    insert into oai.conversation_group_member (conversation_group_fk, conversation_fk, last_use)
     values ($1 :: int8, $2 :: int8, $3 :: date?)
-    on conflict (discourse_group_fk, discussions_fk) do nothing
+    on conflict (conversation_group_fk, conversation_fk) do nothing
   |]
 
 

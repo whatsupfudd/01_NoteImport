@@ -22,6 +22,8 @@ import qualified Data.Vector as V
 
 import GHC.Generics (Generic)
 
+import qualified System.Directory as Sdir
+
 import qualified Data.Aeson as Ae
 
 import qualified Text.Pandoc as P
@@ -57,10 +59,21 @@ import OpenAI.Generate.DocxGeneral
 --
 writeDiscussionDbDocx :: DiscussionDb -> Text -> FilePath -> IO (Either String ())
 writeDiscussionDbDocx discourse title outPath = do
+  opWriterOpts <- case Po.writerReferenceDoc writerOpts of
+    Just refPath -> do
+      fileExistF <- Sdir.doesFileExist refPath
+      liftIO $ putStrLn $ "@[writeDiscussionDbDocx] referenceDocPath: " <> show refPath <> " exists: " <> show fileExistF
+      if fileExistF then
+        pure writerOpts
+      else
+        pure writerOpts { Po.writerReferenceDoc = Nothing }
+    Nothing -> pure writerOpts
+  
   e <- P.runIO $ do
     pd0 <- discourseToPandoc title discourse
-    let pd1 = normalizePandoc pd0
-    bs <- P.writeDocx writerOpts pd1
+    let
+      pd1 = normalizePandoc pd0
+    bs <- P.writeDocx opWriterOpts pd1
     liftIO $ Bl.writeFile outPath bs
   pure $ first show (void e)
 
@@ -146,7 +159,7 @@ messageDbToBlocks idx msg = do
       pure $
         [ styledDiv "GF A Header" [header] ]
           <> sub
-          <> [ 
+          <> [
               styledDiv "GF EndOfReflection" [ P.Para [ P.Str "end-of-reflection" ] ]
             , P.HorizontalRule
             ]
@@ -241,7 +254,7 @@ subActionsBlocksDb v = fmap concat $ forM (V.toList v) $ \sa ->
                     [ P.Header 3 P.nullAttr [P.Str "Search"]
                     , styledDiv "CodeQuerySearch Block" [
                      P.BulletList (map (\q -> [P.Para [P.Str q.questionQS]]) query.searchQueryQS)
-                    ] 
+                    ]
                     ]
         _ -> pure [P.Para [P.Str "(invalid code sub-action payload)"]]
 
@@ -269,7 +282,7 @@ subActionsBlocksDb v = fmap concat $ forM (V.toList v) $ \sa ->
 messageHeaderWithSummaryDb :: Text -> MessageDb -> Text -> Text -> P.Block
 messageHeaderWithSummaryDb role msg anchorId tocLine =
   P.Div ("", [], [("custom-style", "GF MessageHeader")]) [
-      styledDiv "GF MessageSummary" [ P.Para [ 
+      styledDiv "GF MessageSummary" [ P.Para [
               P.Str role
           , P.Str ">"
           , P.Space

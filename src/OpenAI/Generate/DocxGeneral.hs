@@ -126,7 +126,7 @@ writerOpts =
 
 -- Set to (Just "./assets/reference.docx") once you check in your style template.
 referenceDocPath :: Maybe FilePath
-referenceDocPath = Nothing -- Just "Assets/gfReference_1.docx"
+referenceDocPath = Just "Assets/gfReference_1.docx"
 
 
 -- -------------------------------

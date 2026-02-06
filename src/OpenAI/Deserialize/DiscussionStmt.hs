@@ -14,6 +14,21 @@ import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 
 
+fetchAllDiscussionsInGroup :: Statement Text (Vector (Int64, Text, UUID))
+fetchAllDiscussionsInGroup =
+  [TH.vectorStatement|
+    select
+      a.uid::int8
+      , a.title::text
+      , a.uuid::uuid
+    from oai.discussion a
+    join oai.conversations b on b.eid::uuid = a.oaiid
+    join oai.conversation_group_member c on c.conversation_fk = b.uid
+    join oai.conversation_group d on d.uid = c.conversation_group_fk
+    where d.label = $1 :: text
+  |]
+
+
 -- Deserialisation of Discussion:
 selectDiscussionByUuid :: Statement UUID (Maybe (Int64, UUID, Text, UUID))
 selectDiscussionByUuid =
@@ -38,6 +53,19 @@ selectDiscussionByConvId =
       , oaiid :: uuid
     from oai.discussion
     where oaiid = $1 :: uuid
+  |]
+
+
+selectDiscussionByUid :: Statement Int64 (Maybe (Int64, UUID, Text, UUID))
+selectDiscussionByUid =
+  [TH.maybeStatement|
+    select
+      uid :: int8
+      , uuid :: uuid
+      , title :: text
+      , oaiid :: uuid
+    from oai.discussion
+    where uid = $1 :: int8
   |]
 
 

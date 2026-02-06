@@ -13,7 +13,7 @@
 -- The <conversation_eid> is the external ID stored on oai.discourse.conversation_eid
 -- (NOT the UUID).
 --
-module OpenAI.Generate.Elmify ( elmifyDiscourseByEid, discourseToElmItems)
+module OpenAI.Generate.Elmify ( elmifyDiscussionByConvEid, elmifyDiscussionByUuid, discourseToElmItems)
 where
 
 import Control.Monad (when)
@@ -37,6 +37,7 @@ import System.FilePath ((</>))
 import qualified Data.Aeson as Ae
 
 import Data.UUID (UUID)
+import qualified Data.UUID as Uu
 
 import Hasql.Statement (Statement)
 import qualified Hasql.Pool as Hp
@@ -72,29 +73,57 @@ import OpenAI.Types (OaiCodeJson(..))
 --
 -- You can move/rename the file as needed for your EasyWordy/Fuddle repo layout.
 --
-elmifyDiscourseByEid :: FilePath -> Text -> Hp.Pool -> Text -> IO (Either String FilePath)
-elmifyDiscourseByEid destPath discourseEid pool fileTitle = do
-  eUuid <- Hp.use pool $
-    TxS.transaction TxS.ReadCommitted TxS.Read (Tx.statement discourseEid selectDiscourseUuidByEid)
+elmifyDiscussionByConvEid :: FilePath -> Text -> Hp.Pool -> Text -> IO (Either Hp.UsageError (Either String FilePath))
+elmifyDiscussionByConvEid destPath convEid pool fileTitle =
+  case Uu.fromText convEid of
+    Nothing -> pure . Right . Left $ "@[elmifyDiscussinByConvEid] invalid convEid: " <> T.unpack convEid
+    Just convUuid -> do
+      eUuid <- Hp.use pool $
+        TxS.transaction TxS.ReadCommitted TxS.Read (Tx.statement convUuid selectDiscourseUuidByEid)
 
-  case first show eUuid of
-    Left err -> pure (Left err)
-    Right Nothing -> pure (Left ("discourse not found for conversation_eid=" <> T.unpack discourseEid))
-    Right (Just uuid) -> do
-      eCtx <- InO.loadDiscussion pool uuid
-      case eCtx of
-        Left err -> pure (Left err)
-        Right Nothing -> pure (Left ("discourse UUID resolved but load returned Nothing: " <> show uuid))
-        Right (Just ctx) -> do
-          let
-            moduleName = "LegalNodes.Docs." <> T.unpack fileTitle -- mkElmModuleName discourseEid
-            elmText = renderElmModule moduleName discourseEid fileTitle ctx
-            outFile = destPath </> (T.unpack fileTitle <> ".elm")
+      case eUuid of
+        Left err -> pure $ Left err
+        Right Nothing -> pure . Right . Left $ "@[elmifyDiscussinByConvEid] discourse not found for oaiid: " <> T.unpack convEid
+        Right (Just uuid) -> 
+          elmifyDiscussionByUuid destPath uuid pool fileTitle
+          {- do
+          eCtx <- InO.loadDiscussion pool uuid
+          case eCtx of
+            Left err -> pure $ Left err
+            Right opResult -> case opResult of
+              Left err -> pure . Right $ Left err
+              Right Nothing -> pure . Right . Left $ "@[elmifyDiscussinByConvEid] discourse UUID resolved but load returned Nothing: " <> show uuid
+              Right (Just ctx) -> do
+                let
+                  moduleName = "LegalNodes.Docs." <> T.unpack fileTitle -- mkElmModuleName discourseEid
+                  elmText = renderElmModule moduleName convUuid fileTitle ctx
+                  outFile = destPath </> (T.unpack fileTitle <> ".elm")
 
-          putStrLn $ "@[elmifyDiscourseByEid] sending to: " <> outFile
-          createDirectoryIfMissing True destPath
-          TIO.writeFile outFile elmText
-          pure (Right outFile)
+                putStrLn $ "@[elmifyDiscourseByEid] sending to: " <> outFile
+                createDirectoryIfMissing True destPath
+                TIO.writeFile outFile elmText
+                pure . Right $ Right outFile
+            -}
+
+
+elmifyDiscussionByUuid :: FilePath -> UUID -> Hp.Pool -> Text -> IO (Either Hp.UsageError (Either String FilePath))
+elmifyDiscussionByUuid destPath uuid pool fileTitle = do
+  eCtx <- InO.loadDiscussion pool uuid
+  case eCtx of
+    Left err -> pure $ Left err
+    Right opResult -> case opResult of
+      Left err -> pure . Right $ Left err
+      Right Nothing -> pure . Right . Left $ "@[elmifyDiscussionByUuid] discourse UUID resolved but load returned Nothing: " <> show uuid
+      Right (Just ctx) -> do
+        let
+          moduleName = "LegalNodes.Docs." <> T.unpack fileTitle -- mkElmModuleName discourseEid
+          elmText = renderElmModule moduleName uuid fileTitle ctx
+          outFile = destPath </> (T.unpack fileTitle <> ".elm")
+
+        putStrLn $ "@[elmifyDiscussionByUuid] sending to: " <> outFile
+        createDirectoryIfMissing True destPath
+        TIO.writeFile outFile elmText
+        pure . Right $ Right outFile
 
 
 -- ---------------------------------
@@ -102,13 +131,13 @@ elmifyDiscourseByEid destPath discourseEid pool fileTitle = do
 -- ---------------------------------
 
 -- | Resolve a discourse UUID by the external conversation_eid.
-selectDiscourseUuidByEid :: Statement Text (Maybe UUID)
+selectDiscourseUuidByEid :: Statement UUID (Maybe UUID)
 selectDiscourseUuidByEid =
   [TH.maybeStatement|
     select
       d.uuid :: uuid
-    from oai.discourse d
-    where d.conversation_eid = $1 :: text
+    from oai.discussion d
+    where d.oaiid = $1 :: uuid
   |]
 
 
@@ -117,7 +146,7 @@ selectDiscourseUuidByEid =
 -- ---------------------------------
 
 -- | Render the full Elm module.
-renderElmModule :: FilePath -> Text -> Text -> DiscussionDb -> Text
+renderElmModule :: FilePath -> UUID -> Text -> DiscussionDb -> Text
 renderElmModule moduleName discussionId fileTitle ctx =
   let items = discourseToElmItems ctx
       issues = issuesToElm ctx
@@ -126,7 +155,7 @@ renderElmModule moduleName discussionId fileTitle ctx =
       , ""
       , "import Components.LegalNodes.ReferenceDoc.Types as T"  -- NOTE: adapt to your actual EasyWordy/Fuddle thread-types module
       , ""
-      , "content = (" <> elmString fileTitle <> ", " <> elmString discussionId <> ", messages)"
+      , "content = (" <> elmString fileTitle <> ", " <> elmString (Uu.toText discussionId) <> ", messages)"
       , ""
       , "messages = " <> items
       ]
@@ -234,7 +263,9 @@ subActionDbToElm sa =
 -- Ensures no raw newlines leak into "...".
 elmString :: Text -> Text
 elmString t =
-  let t' = escapeCommon t
+  let
+    t' = T.replace "\\" "\\\\" t
+        & T.replace "\"" ("\\" <> "\"")
         & T.replace "\n" "\n"
         & T.replace "\r" ""
         & T.replace "…" "..."
@@ -243,10 +274,17 @@ elmString t =
 -- | For Elm multiline string literals """...""".
 elmTriple :: Text -> Text
 elmTriple t =
-  let t' = escapeCommon t
+  let
+    t' = T.replace "\\" "\\\\" t
         -- prevent accidental terminator
         & T.replace "\"\"\"" "\\\"\\\"\\\""
-  in "\"\"\"" <> t' <> "\"\"\""
+  in
+  if T.null t' then
+    "\"\""
+  else if T.last t' == '"' then 
+    "\"\"\"" <> t' <> " \"\"\""
+  else
+    "\"\"\"" <> t' <> "\"\"\""
 
 escapeCommon :: Text -> Text
 escapeCommon =
