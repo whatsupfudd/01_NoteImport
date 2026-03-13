@@ -103,10 +103,14 @@ gfTargets =
 parseJson :: FilePath -> Bool -> IO (Either String [Jd.Conversation])
 parseJson jsonFile exportB = do
   jsonContent <- BS.readFile jsonFile
-  pure $ if exportB then
-    Ae.eitherDecode jsonContent :: Either String [Jd.Conversation]
+  if exportB then
+    pure $ (Ae.eitherDecode jsonContent :: Either String [Jd.Conversation])
   else
-    L.singleton <$> (Ae.eitherDecode jsonContent :: Either String Jd.Conversation)
+    case Ae.eitherDecode jsonContent :: Either String Jd.Conversation of
+      Left errMsg -> pure $ Left errMsg
+      Right jsonConv -> do
+        putStrLn $ "@[parseJson] jsonConv: " <> unpack jsonConv.convIdCv
+        pure . Right . L.singleton $ jsonConv 
 
 
 printJson :: Opt.OaiJsonOpts -> Opt.TargetsOpts -> IO ()
