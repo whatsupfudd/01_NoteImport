@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE LambdaCase #-}
 
-module DocX.Logic_v1 (Doc (..), readDocxPandoc, buildDoc) where
+module DocXOld.Logic_v1 (Doc (..), readDocxPandoc, buildDoc) where
 
 import Control.Monad (foldM)
 import qualified Data.ByteArray.Encoding as BAE
@@ -57,9 +57,18 @@ data Doc = Doc
 
 -- BlockKind captures the semantics/UI affordances downstream
 
-data BlockKind
-  = BkRoot | BkTitle | BkSection | BkParagraph | BkList | BkListItem
-  | BkTable | BkFigure | BkCode | BkQuote | BkRule
+data BlockKind = 
+    BkRoot
+  | BkTitle
+  | BkSection
+  | BkParagraph
+  | BkList
+  | BkListItem
+  | BkTable
+  | BkFigure
+  | BkCode
+  | BkQuote
+  | BkRule
   deriving (Show, Read, Eq, Ord, Generic, Ae.ToJSON)
 
 -- Block stores tree shape and lightweight content/attrs
@@ -221,25 +230,26 @@ ordinalToString = intercalate "." . map show
 
 -- Stringify inlines (minimal, no formatting markers)
 inlineText :: [PT.Inline] -> Text
-inlineText = T.strip . T.concat . map go
+inlineText = T.strip . T.concat . map inlineSelector
   where
-    go = \case
-      PT.Str t        -> t
-      PT.Space        -> " "
-      PT.SoftBreak    -> " "
-      PT.LineBreak    -> " "
-      PT.Code _ t     -> t
-      PT.Emph xs      -> inlineText xs
-      PT.Strong xs    -> inlineText xs
-      PT.Underline xs -> inlineText xs
-      PT.SmallCaps xs -> inlineText xs
-      PT.Quoted _ xs  -> inlineText xs
-      PT.Span _ xs    -> inlineText xs
-      PT.Link _ xs _  -> inlineText xs
-      PT.Image _ xs _ -> inlineText xs
-      PT.Math _ t     -> t
-      PT.RawInline _ t-> t
-      PT.Note _       -> ""
+  inlineSelector = \case
+    PT.Str t -> t
+    PT.Space -> " "
+    PT.SoftBreak -> " "
+    PT.LineBreak -> " "
+    PT.Code _ t -> t
+    PT.Emph xs -> inlineText xs
+    PT.Strong xs -> inlineText xs
+    PT.Underline xs -> inlineText xs
+    PT.SmallCaps xs -> inlineText xs
+    PT.Quoted _ xs -> inlineText xs
+    PT.Span _ xs -> inlineText xs
+    PT.Link _ xs _ -> inlineText xs
+    PT.Image _ xs _ -> inlineText xs
+    PT.Math _ t -> t
+    PT.RawInline _ t-> t
+    PT.Note _ -> ""
+
 
 attrMap :: PT.Attr -> M.Map Text Text
 attrMap (ident, classes, kvs) =

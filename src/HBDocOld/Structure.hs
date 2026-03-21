@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric  #-}
-module HBDoc.Structure where
+module HBDocOld.Structure where
 
 import Data.Int (Int32)
 import Data.Text (Text)

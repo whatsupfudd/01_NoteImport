@@ -1,7 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE LambdaCase #-}
 
-module DB.Statements where
+module DB.StatementsOld where
 
 import Control.Exception (bracket)
 import Data.Profunctor (dimap)
@@ -22,7 +22,7 @@ import Hasql.Pool (Pool)
 import qualified Hasql.Pool as Pool
 import Hasql.TH
 
-import HBDoc.Structure
+import HBDoc.DbTypes
 
 -- Users / Auth -----------------------------------------------
 qGetUserByEmail :: St.Statement Text (Maybe User)
@@ -327,7 +327,14 @@ qEnsureRoot = [singletonStatement|
   select kms.ensure_doc_root($1::int4, $2::int4)::int4
 |]
 
-
+-- Params:
+-- 1. document_fk: Int32 - the document ID
+-- 2. parent_fk: Maybe Int32 - the parent block ID (optional)
+-- 3. kind: Text - the block kind
+-- 4. text: Maybe Text - the block text (optional)
+-- 5. attrs: Maybe Ae.Value - the block attributes (optional)
+-- 6. created_by_user_fk: Int32 - the user ID who created the block
+-- Returns: Int32 - the new block ID
 qAppendChild :: St.Statement (Int32, Maybe Int32, Text, Maybe Text, Maybe Ae.Value, Int32) Int32
 qAppendChild = [singletonStatement|
   select kms.append_child_import($1::int4, $2::int4?, $3::text, $4::text?, $5::jsonb?, $6::int4)::int4

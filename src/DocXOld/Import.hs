@@ -21,7 +21,7 @@
 --   • 'HBDoc.Html.Import'
 --   • 'HBDoc.Markdown.Import'
 --
-module DocX.Import
+module DocXOld.Import
   ( -- * Options / modes
   DocXImportOptions(..)
     -- * Result & errors
@@ -43,8 +43,8 @@ import qualified Crypto.Hash as CH
 
 import HBDoc.Types (Doc(..), EnrichmentLevel(..), StructureSource(..))
 
-import qualified DocX.Pandoc as PandocImport
-import qualified DocX.Xml as Xi
+import qualified DocXOld.Pandoc as PandocImport
+import qualified DocXOld.Xml as Xi
 
 
 --------------------------------------------------------------------------------
@@ -118,21 +118,15 @@ data DocXImportError
 --        • applies 'titleOverrideOpts' if provided
 --   4. Optionally keeps the original .docx bytes if 'keepOriginalOpts' is True.
 --
-importDocxBytes
-  :: DocXImportOptions
-  -> BL.ByteString
-  -> IO (Either DocXImportError DocXImportResult)
+importDocxBytes :: DocXImportOptions -> BL.ByteString -> IO (Either DocXImportError DocXImportResult)
 importDocxBytes opts lbs
   | BL.null lbs =
       pure (Left (DocXInvalidInputError "Empty input: DOCX ByteString is empty"))
   | otherwise = do
       eDoc <- case structureSourceOpts opts of
-        StructureFromPandoc ->
-          importStructureWithPandoc lbs
-        StructureFromXml ->
-          importStructureWithXml lbs
-        StructureAuto ->
-          importStructureAuto lbs
+        StructureFromPandoc -> importStructureWithPandoc lbs
+        StructureFromXml -> importStructureWithXml lbs
+        StructureAuto -> importStructureAuto lbs
 
       case eDoc of
         Left err -> pure (Left err)
@@ -141,10 +135,7 @@ importDocxBytes opts lbs
           runEnrichment opts lbs doc1
 
 -- | Convenience wrapper: read a .docx from disk and call 'importDocxBytes'.
-importDocxFile
-  :: DocXImportOptions
-  -> FilePath
-  -> IO (Either DocXImportError DocXImportResult)
+importDocxFile  :: DocXImportOptions -> FilePath -> IO (Either DocXImportError DocXImportResult)
 importDocxFile opts fp = do
   lbs <- BL.readFile fp
   importDocxBytes opts lbs
@@ -155,9 +146,7 @@ importDocxFile opts fp = do
 --------------------------------------------------------------------------------
 
 -- Structural import via Pandoc
-importStructureWithPandoc
-  :: BL.ByteString
-  -> IO (Either DocXImportError Doc)
+importStructureWithPandoc :: BL.ByteString -> IO (Either DocXImportError Doc)
 importStructureWithPandoc lbs = do
   -- HBDoc.DocX.Pandoc.importDocxPandoc is expected to be:
   --   importDocxPandoc :: BL.ByteString -> IO (Either Text Doc)
@@ -165,10 +154,9 @@ importStructureWithPandoc lbs = do
     Left errTxt -> pure (Left (DocXPandocError errTxt))
     Right doc   -> pure (Right doc)
 
+
 -- Structural import via XML
-importStructureWithXml
-  :: BL.ByteString
-  -> IO (Either DocXImportError Doc)
+importStructureWithXml :: BL.ByteString -> IO (Either DocXImportError Doc)
 importStructureWithXml lbs = do
   -- HBDoc.DocX.Xml.importDocxStructure is expected to be:
   --   importDocxStructure :: BL.ByteString -> IO (Either Text Doc)
@@ -177,9 +165,7 @@ importStructureWithXml lbs = do
     Right doc   -> pure (Right doc)
 
 -- Auto mode: try Pandoc first, fall back to XML if Pandoc fails.
-importStructureAuto
-  :: BL.ByteString
-  -> IO (Either DocXImportError Doc)
+importStructureAuto :: BL.ByteString -> IO (Either DocXImportError Doc)
 importStructureAuto lbs = do
   ePandoc <- importStructureWithPandoc lbs
   case ePandoc of

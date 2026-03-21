@@ -32,27 +32,33 @@ import Hasql.TH
 
 -- Unified HBDoc types
 import HBDoc.Types (Doc(..), Block(..), BlockKind(..), ObjectAttrs(..), EnrichmentLevel(..))
-import HBDoc.Structure (User(..))
+import HBDoc.DbTypes (User(..))
 
 import qualified DB.Connect as Dbc
-import qualified DB.Statements as Dbs
-import qualified DB.Operations as Dbo
 
 import qualified Options.Runtime as Rt
 import qualified Options.Types as Opt
 
+import qualified HBDoc.Serialize.Statements as Dbs
+import qualified HBDoc.Serialize.Operations as Dbo
+import qualified HBDoc.Markdown.Import as Mdi
+import qualified HBDoc.Serialize.Write as Sw
+import qualified HBDoc.Serialize.Types as Sw
+import qualified HBDoc.PrettyPrint as Pp
+import qualified HBDoc.Ingest.Types as Sit
+
+
 -- DOCX orchestrator (structural import + optional enrichment)
-import DocX.Import ( DocXImportOptions(..), DocXImportResult(..), DocXImportError(..)
+import HBDoc.DocX.Import ( DocXImportOptions(..), DocXImportResult(..), DocXImportError(..)
       , importDocxBytes, importDocxFile)
 
-
+{-
 data ApiResult a = ApiResult {
     okAR :: !Bool
     , resultAR :: !(Maybe a)
     , errAR :: !(Maybe Text)
   }
   deriving (Show, Eq)
-
 
 data SerializeInfo = SerializeInfo {
       userName :: Text
@@ -64,7 +70,7 @@ data SerializeInfo = SerializeInfo {
     , originalName :: Text
     , document :: Doc
   }
-
+-}
 
 runIngest :: Opt.IngestOpts -> Rt.RunOptions -> IO ()
 runIngest opts rtOpts = do
@@ -80,7 +86,7 @@ runIngest opts rtOpts = do
       putStrLn "@[runIngest] starting serialization."
       let
         pgPool = Dbc.startPg rtOpts.pgDbConf
-        sInfo = SerializeInfo {
+        sInfo = Sw.SerializeInfo {
             userName = opts.userName
           , mbDocID = fromIntegral <$> opts.docId
           , contentType = case opts.format of
@@ -104,9 +110,9 @@ runIngest opts rtOpts = do
         Right apiRez -> do
           pure ()
   where
-  mainAction :: SerializeInfo -> Pool -> IO (Either String (ApiResult Int32))
+  mainAction :: Sw.SerializeInfo -> Pool -> IO (Either String (Sit.ApiResult Int32))
   mainAction sInfo dbPool = do
-    rezB <- serializeDocument dbPool sInfo
+    rezB <- Sw.serializeDocument dbPool sInfo
     putStrLn "@[runIngest] serialization done."
     pure rezB
 
@@ -161,28 +167,26 @@ runHtml opts rtOpts = do
 
 runMarkdown :: Opt.IngestOpts -> Rt.RunOptions -> IO (Either DocXImportError DocXImportResult)
 runMarkdown opts rtOpts = do
-  putStrLn "Markdown import not yet wired. (Stub) Returning empty document."
-  inFile <- case opts.input of
-            Opt.FromFile fp -> BL.readFile fp
-            Opt.FromStdin -> BL.getContents
-  let
-    doc = Doc { uidDoc = Nothing
-                , stableIdDoc = Nothing
-                , titleDoc = fromMaybe "" opts.titleOverride
-                , formatDoc = Just "markdown"
-                , metaDoc = M.empty
-                , blocksDoc = []
-                }
-  outputDocOnly opts doc
-  let
-    docResult = DocXImportResult {
-      docResDocX = doc
-      , originalBytesDocX = Nothing
-      , warningsDocX = []
-      , sha256 = "<no sha256 signature>"
-      , keyName = "1234-5678-9012-3456"
-    }
-  pure (Right docResult)
+  (inFile, filePath) <- case opts.input of
+            Opt.FromFile fp ->
+              TIO.readFile fp >>= \inFile -> pure (inFile, fp)
+            Opt.FromStdin -> BL.getContents >>= \inFile -> pure (TE.decodeUtf8 $ BL.toStrict inFile, "<stdin>")
+  eiRez <- Mdi.importFromBytes Mdi.defaultConfig filePath inFile
+  case eiRez of
+    Left err -> do
+      putStrLn $ "Markdown import failed: " <> err
+      pure . Left $ DocXInvalidInputError (T.pack err)
+    Right pandoc -> do
+      outputDocOnly opts pandoc
+      let
+        docResult = DocXImportResult {
+          docResDocX = pandoc
+          , originalBytesDocX = Nothing
+          , warningsDocX = []
+          , sha256 = "<no sha256 signature>"
+          , keyName = "1234-5678-9012-3456"
+        }
+      pure (Right docResult)
 
 -- ----------------------------------------------------------------------------
 -- Output helpers
@@ -195,7 +199,7 @@ outputResult opts res = do
     Opt.OutJson   -> do
       let bs = Ae.encode (docResDocX res)
       maybe (BL.putStr bs) (`BL.writeFile` bs) opts.writeJson
-    Opt.OutPretty -> prettyPrintDoc (docResDocX res)
+    Opt.OutPretty -> Pp.prettyPrintDoc (docResDocX res)
 
 
 outputDocOnly :: Opt.IngestOpts -> Doc -> IO ()
@@ -204,7 +208,7 @@ outputDocOnly opts doc =
     Opt.OutJson   -> do
       let bs = Ae.encode doc
       maybe (BL.putStr bs) (`BL.writeFile` bs) opts.writeJson
-    Opt.OutPretty -> prettyPrintDoc doc
+    Opt.OutPretty -> Pp.prettyPrintDoc doc
 
 showDocxErr :: DocXImportError -> String
 showDocxErr = \case
@@ -214,6 +218,7 @@ showDocxErr = \case
   DocXEnrichmentError t   -> "Enrichment: " <> T.unpack t
   DocXCombinedError t     -> T.unpack t
 
+{-
 -- Simple, readable tree printer for Doc/Block
 prettyPrintDoc :: Doc -> IO ()
 prettyPrintDoc d = do
@@ -251,8 +256,8 @@ ppBlock depth b = do
 
 truncateText :: Int -> Text -> Text
 truncateText n t = if T.length t <= n then t else T.take n t <> "…"
-
-
+-}
+{-
 -- DB Storage -----------------------------------------------------------------
 
 useTx :: Pool -> Tx.Transaction tr -> IO (Either UsageError tr)
@@ -408,3 +413,4 @@ serializeDocument pool sInfo = do
     | ".gif" `T.isSuffixOf` T.toLower t = "image/gif"
     | otherwise = "application/octet-stream"
 
+-}

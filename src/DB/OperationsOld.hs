@@ -1,4 +1,4 @@
-module DB.Operations where
+module DB.OperationsOld where
 
 import Control.Monad (void)
 import Data.Int (Int32)
@@ -12,8 +12,8 @@ import Hasql.Session (statement)
 import Hasql.Pool (Pool, use)
 import qualified Hasql.Session as S
 
-import DB.Statements as Dbs
-import HBDoc.Structure
+import DB.StatementsOld as Dbs
+import HBDoc.DbTypes
 
 -- Helpers -----------------------------------------------------
 err :: Text -> ApiResult a

@@ -173,24 +173,29 @@ renderElmModule moduleName discussionId fileTitle ctx =
 discourseToElmItems :: DiscussionDb -> Text
 discourseToElmItems ctx =
   let
-    msgs = V.toList (messagesCo ctx)
+    msgs = V.toList ctx.messagesCo
     elmStructs = zipWith messageDbToElm msgs [1..]
     kept = filter (not . T.null) elmStructs
-  in "[\n  " <> T.intercalate "\n  , " kept <> "\n  ]"
+  in
+  "[\n  " <> T.intercalate "\n  , " kept <> "\n  ]"
 
 
 issuesToElm :: DiscussionDb -> Text
 issuesToElm ctx =
-  let xs = map textIs (V.toList (issuesCo ctx))
-  in "[ " <> T.intercalate ", " (map elmString xs) <> " ]"
+  let
+    xs = map textIs (V.toList ctx.issuesCo)
+  in
+  "[ " <> T.intercalate ", " (map elmString xs) <> " ]"
 
 
 messageDbToElm :: MessageDb -> Int -> Text
 messageDbToElm msg index =
-  let msgID = "msg_" <> T.pack (show index)
-  in case kindMb msg of
+  let
+    msgID = "msg_" <> T.pack (show index)
+  in
+  case msg.kindMb of
       UserMK ->
-        case bodyMb msg of
+        case msg.bodyMb of
           UserBody { textUB = t, summaryUB = s } ->
             let titleTxt = fromMaybe msgID s
             in "{ id = " <> elmString msgID
@@ -199,17 +204,19 @@ messageDbToElm msg index =
           _ -> ""
 
       AssistantMK ->
-        case bodyMb msg of
+        case msg.bodyMb of
           AssistantBody { responseTextAB = mResp, summaryAB = s } ->
-            let titleTxt = fromMaybe msgID s
-                respTxt  = fromMaybe "No response" mResp
-                content  = map subActionDbToElm (V.toList (subActionsMb msg))
+            let
+              titleTxt = fromMaybe msgID s
+              respTxt  = fromMaybe "No response" mResp
+              content  = map subActionDbToElm (V.toList msg.subActionsMb)
                         <> [ "T.LineSep"
                            , "T.Basic " <> elmTriple respTxt
                            ]
-            in "{ id = " <> elmString msgID
-              <> ", kind = T.Answer, title = " <> elmString titleTxt
-              <> ", body = [ " <> T.intercalate "\n  , " content <> "\n    ] }"
+            in
+            "{ id = " <> elmString msgID
+            <> ", kind = T.Answer, title = " <> elmString titleTxt
+            <> ", body = [ " <> T.intercalate "\n  , " content <> "\n    ] }"
           _ -> ""
 
       _ -> ""
@@ -217,9 +224,9 @@ messageDbToElm msg index =
 
 subActionDbToElm :: SubActionDb -> Text
 subActionDbToElm sa =
-  case kindSa sa of
+  case sa.kindSa of
     IntermediateSAK ->
-      case bodySa sa of
+      case sa.bodySa of
         IntermediateBody { textIb = t } ->
           if T.null t
             then "T.Intermediate \"\""
@@ -227,13 +234,13 @@ subActionDbToElm sa =
         _ -> "T.Error \"Invalid Intermediate payload\""
 
     ReflectionSAK ->
-      case bodySa sa of
+      case sa.bodySa of
         ReflectionBody { summarySab = summ, contentSab = cont } ->
           "T.Reflect " <> elmString summ <> " " <> elmTriple cont
         _ -> "T.Error \"Invalid Reflection payload\""
 
     CodeSAK ->
-      case bodySa sa of
+      case sa.bodySa of
         CodeBody { languageCb = lang, formatNameCb = fmt, textCb = txt } ->
           case T.toLower lang of
             "json" ->

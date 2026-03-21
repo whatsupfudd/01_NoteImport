@@ -11,27 +11,27 @@
 -- It does *not* deal with DOCX-specific tracked changes or comments;
 -- those are handled in the XML-based enrichment layer.
 
-module DocX.Pandoc where
+module DocXOld.Pandoc where
 
-import Data.Int                    (Int32)
-import qualified Data.ByteArray.Encoding     as BAE
-import qualified Data.ByteString             as BS
-import qualified Data.ByteString.Lazy        as BL
-import Data.List                   (intercalate)
-import qualified Data.Map.Strict             as M
-import Data.Maybe                  (mapMaybe)
-import Data.Text                   (Text)
-import qualified Data.Text                   as T
-import qualified Data.Text.Encoding          as TE
+import Data.Int (Int32)
+import qualified Data.ByteArray.Encoding as BAE
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
+import Data.List (intercalate)
+import qualified Data.Map.Strict as M
+import Data.Maybe (mapMaybe)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 
-import Crypto.Hash                 (SHA256, hashWith)
+import Crypto.Hash (SHA256, hashWith)
 
-import qualified Text.Megaparsec             as MP
-import Text.Megaparsec             (Parsec)
-import qualified Text.Megaparsec.Char        as MPC
+import qualified Text.Megaparsec as MP
+import Text.Megaparsec (Parsec)
+import qualified Text.Megaparsec.Char as MPC
 
-import qualified Text.Pandoc                 as P
-import qualified Text.Pandoc.Definition      as PT
+import qualified Text.Pandoc as P
+import qualified Text.Pandoc.Definition as PT
 
 import HBDoc.Types ( Doc(..), Block(..), BlockKind(..), ObjectAttrs(..))
 

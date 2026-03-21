@@ -33,14 +33,14 @@ library
       Commands.OpenAI
       Commands.Version
       DB.Connect
-      DB.Operations
-      DB.Statements
-      DocX.Import
-      DocX.Logic_v1
-      DocX.Pandoc
-      DocX.Xml
-      HBDoc.Structure
-      HBDoc.Types
+      DB.OperationsOld
+      DB.StatementsOld
+      DocXOld.Import
+      DocXOld.Logic_v1
+      DocXOld.Pandoc
+      DocXOld.Xml
+      HBDocOld.Structure
+      HBDocOld.Types
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
@@ -96,6 +96,7 @@ library
     , hasql-pool
     , hasql-th
     , hasql-transaction
+    , hbdoc
     , http-client
     , http-client-tls
     , http-types
@@ -150,6 +151,7 @@ executable docimp
     , hasql-pool
     , hasql-th
     , hasql-transaction
+    , hbdoc
     , http-client
     , http-client-tls
     , http-types
@@ -205,6 +207,7 @@ test-suite docimp-test
     , hasql-pool
     , hasql-th
     , hasql-transaction
+    , hbdoc
     , http-client
     , http-client-tls
     , http-types

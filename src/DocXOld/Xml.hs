@@ -11,7 +11,7 @@
 -- It intentionally keeps structure simple and conservative; the Pandoc importer
 -- is the canonical structural path, while this XML layer supplies fidelity where
 -- Pandoc does not (revisions, comments, fine list/style meta).
-module DocX.Xml
+module DocXOld.Xml
   ( -- * Types
     EnrichmentLevel(..)
     -- * API

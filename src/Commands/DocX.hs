@@ -43,7 +43,9 @@ import qualified Data.Yaml.Pretty as YP
 import qualified Options.Runtime as Rt
 import qualified Options.Types as Opt
 
-import qualified DocX.Logic_v1 as Dl
+import qualified HBDoc.DocX.Simple as Dl
+import qualified HBDoc.Convert.Pandoc as Cp
+import HBDoc.Types (Doc(..))
 
 loadDoc :: Opt.DocXOpts -> Rt.RunOptions -> IO ()
 loadDoc opts rtOpts = do
@@ -52,18 +54,18 @@ loadDoc opts rtOpts = do
     Left err -> fail ("Failed to read DOCX: " <> err)
     Right pandocDoc -> do
       let
-        d = Dl.buildDoc opts.promote opts.inPath pandocDoc
+        d = Cp.buildDoc opts.promote opts.inPath pandocDoc
       (if opts.asYaml then emitYaml opts.outPath d else emitJson opts.outPath d)
 
 
-emitJson :: Maybe FilePath -> Dl.Doc -> IO ()
+emitJson :: Maybe FilePath -> Doc -> IO ()
 emitJson mb d = case mb of
   Nothing -> BL.putStr (AeP.encodePretty' cfg d)
   Just fp -> BL.writeFile fp (AeP.encodePretty' cfg d)
   where
     cfg = AeP.defConfig { AeP.confCompare = AeP.compare }
 
-emitYaml :: Maybe FilePath -> Dl.Doc -> IO ()
+emitYaml :: Maybe FilePath -> Doc -> IO ()
 emitYaml mb doc = do
   let val = Ae.toJSON doc
       cfg = YP.setConfDropNull True YP.defConfig

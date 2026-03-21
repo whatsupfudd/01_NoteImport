@@ -73,6 +73,7 @@ dependencies:
   - scalpel
   # For transformer monads (ExceptT, runExceptT, ...):
   - transformers
+  - hbdoc
 
 
 default-extensions:

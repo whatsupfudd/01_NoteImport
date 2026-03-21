@@ -846,14 +846,15 @@ CREATE OR REPLACE FUNCTION kms.get_blocks_dfs_at_seq(
   depth INT,
   block_id INT,
   parent_block_id INT,
+  kind TEXT,
   content TEXT,
   seq_pos NUMERIC(38,10),
   has_more BOOLEAN
 ) LANGUAGE sql AS $$
 WITH RECURSIVE tree AS (
   SELECT
-    1 AS depth, b.uid AS block_id, b.parent_fk AS parent_block_id,
-    b.content, b.seq_pos,
+    1 AS depth, b.uid AS block_id, b.parent_fk AS parent_block_id
+    , b.kind, b.content, b.seq_pos,
     (p_max_depth IS NOT NULL
       AND 1 = p_max_depth
       AND EXISTS (
@@ -871,17 +872,25 @@ WITH RECURSIVE tree AS (
   UNION ALL
 
   SELECT
-    t.depth+1, c.uid, c.parent_fk, c.content, c.seq_pos,
+    t.depth+1, c.uid, c.parent_fk, c.kind, c.content, c.seq_pos,
     (p_max_depth IS NOT NULL AND t.depth+1 = p_max_depth
-      AND EXISTS (SELECT 1 FROM kms.blocks_bd x WHERE x.parent_fk = c.uid AND x.valid_from_seq <= p_as_of_seq AND (x.valid_to_seq IS NULL OR x.valid_to_seq > p_as_of_seq))) AS has_more,
-    (t.path || c.seq_pos)::numeric(38,10)[] AS path
+      AND EXISTS (
+        SELECT 1
+        FROM kms.blocks_bd x
+        WHERE x.parent_fk = c.uid
+          AND x.valid_from_seq <= p_as_of_seq
+          AND (x.valid_to_seq IS NULL OR x.valid_to_seq > p_as_of_seq)
+        )
+    ) AS has_more
+    , (t.path || c.seq_pos)::numeric(38,10)[] AS path
   FROM tree t
   JOIN kms.blocks_bd c ON c.parent_fk = t.block_id
     AND c.doc_fk = p_document_id
     AND c.valid_from_seq <= p_as_of_seq AND (c.valid_to_seq IS NULL OR c.valid_to_seq > p_as_of_seq)
   WHERE p_max_depth IS NULL OR t.depth < p_max_depth
 )
-SELECT depth,block_id,parent_block_id,content,seq_pos,has_more
+SELECT
+  depth, block_id, parent_block_id, kind, content, seq_pos, has_more
 FROM tree ORDER BY path
   OFFSET GREATEST(p_offset,0)
   LIMIT CASE WHEN p_limit IS NULL OR p_limit<0 THEN NULL ELSE p_limit END;

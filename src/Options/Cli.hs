@@ -155,10 +155,10 @@ ingestOpts =
        <> help "Input format" )
       where
         toFmt s = case s of
-          "docx"     -> Right FDocx
-          "html"     -> Right FHtml
+          "docx" -> Right FDocx
+          "html" -> Right FHtml
           "markdown" -> Right FMarkdown
-          other      -> Left $ "Unknown format: " <> other
+          other -> Left $ "Unknown format: " <> other
 
     inputP :: Parser Input
     inputP =
@@ -175,9 +175,9 @@ ingestOpts =
       where
         toStruct = \case
           "pandoc" -> Right StructureFromPandoc
-          "xml"    -> Right StructureFromXml
-          "auto"   -> Right StructureAuto
-          other    -> Left $ "Unknown structure: " <> other
+          "xml"  -> Right StructureFromXml
+          "auto" -> Right StructureAuto
+          other -> Left $ "Unknown structure: " <> other
 
     enrichP :: Parser EnrichmentLevel
     enrichP =
@@ -202,9 +202,9 @@ ingestOpts =
        <> help "Output mode" )
       where
         toOut = \case
-          "json"   -> Right OutJson
+          "json" -> Right OutJson
           "pretty" -> Right OutPretty
-          other    -> Left $ "Unknown out mode: " <> other
+          other -> Left $ "Unknown out mode: " <> other
 
 
 oaiSubCommands :: Parser Command

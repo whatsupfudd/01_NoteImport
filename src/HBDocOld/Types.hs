@@ -15,7 +15,7 @@
 --   • This is *import-time* structure; DB persistence remains in
 --     KMS.Types / SQL (blocks_bd) with a separate mapping layer.
 
-module HBDoc.Types where
+module HBDocOld.Types where
 
 import Data.Int (Int32)
 import Data.Map.Strict (Map)
@@ -31,13 +31,13 @@ import Data.Aeson (FromJSON, ToJSON)
 -- 'uidDoc' can be filled once the document is attached to a DB row;
 -- 'stableIdDoc' is a deterministic textual id (e.g. SHA-256 prefix
 -- as used in the Pandoc-based importer).
-data Doc = Doc
-  { uidDoc       :: !(Maybe Int32)        -- ^ DB document.uid, if known
-  , stableIdDoc  :: !(Maybe Text)         -- ^ stable import id (e.g. hex prefix)
-  , titleDoc     :: !Text                 -- ^ logical title (from Pandoc meta or DOCX styles)
-  , formatDoc    :: !(Maybe Text)         -- ^ "docx" | "html" | "markdown" | ...
-  , metaDoc      :: !(Map Text Text)      -- ^ arbitrary document-level metadata
-  , blocksDoc    :: ![Block]              -- ^ top-level blocks (root children)
+data Doc = Doc { 
+    uidDoc :: !(Maybe Int32)        -- ^ DB document.uid, if known
+  , stableIdDoc :: !(Maybe Text)         -- ^ stable import id (e.g. hex prefix)
+  , titleDoc :: !Text                 -- ^ logical title (from Pandoc meta or DOCX styles)
+  , formatDoc :: !(Maybe Text)         -- ^ "docx" | "html" | "markdown" | ...
+  , metaDoc :: !(Map Text Text)      -- ^ arbitrary document-level metadata
+  , blocksDoc :: ![Block]              -- ^ top-level blocks (root children)
   } deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Semantic kind of a block.
@@ -73,13 +73,13 @@ data BlockKind =
 -- This is the unified node type that both Pandoc-based and DOCX-XML-
 -- based pipelines should produce.
 data Block = Block
-  { uidBlk      :: !Int32                 -- ^ simple incremental id within imported doc
+  { uidBlk :: !Int32                 -- ^ simple incremental id within imported doc
   , stableIdBlk :: !(Maybe Text)          -- ^ optional stable textual id (e.g. hash)
-  , kindBlk     :: !BlockKind             -- ^ semantic kind
-  , levelBlk    :: !(Maybe Int32)         -- ^ heading level or list level (when useful)
-  , textBlk     :: !(Maybe Text)          -- ^ normalized textual content / preview
-  , attrsBlk    :: !(Maybe ObjectAttrs)   -- ^ style/numbering/media/HTML attrs
-  , kidsBlk     :: ![Block]               -- ^ children (subsections, list items, cells, ...)
+  , kindBlk :: !BlockKind             -- ^ semantic kind
+  , levelBlk :: !(Maybe Int32)         -- ^ heading level or list level (when useful)
+  , textBlk :: !(Maybe Text)          -- ^ normalized textual content / preview
+  , attrsBlk :: !(Maybe ObjectAttrs)   -- ^ style/numbering/media/HTML attrs
+  , kidsBlk :: ![Block]               -- ^ children (subsections, list items, cells, ...)
   } deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Extra attributes for a block.
@@ -90,24 +90,24 @@ data Block = Block
 --
 -- Everything optional; importers fill whatever they know.
 data ObjectAttrs = ObjectAttrs
-  { styleNameOA    :: !(Maybe Text)         -- ^ human-readable style name (DOCX)
-  , styleIdOA      :: !(Maybe Text)         -- ^ style id (DOCX w:pStyle/@w:val)
-  , numIdOA        :: !(Maybe Int32)        -- ^ numbering id (w:numId)
-  , ilvlOA         :: !(Maybe Int32)        -- ^ list level (w:ilvl)
-  , numFmtOA       :: !(Maybe Text)         -- ^ numbering format (e.g. "decimal", "bullet")
-  , lvlTextOA      :: !(Maybe Text)         -- ^ level text pattern (e.g. "%1.%2.")
-  , startAtOA      :: !(Maybe Int32)        -- ^ list start at
-  , captionOA      :: !(Maybe Text)         -- ^ caption text (figures/tables/images)
-  , imageRidOA     :: !(Maybe Text)         -- ^ DOCX relationship id for image
-  , imageNameOA    :: !(Maybe Text)         -- ^ image original filename
-  , imageKeyOA     :: !(Maybe Text)         -- ^ object-store key for binary asset
-  , widthEmuOA     :: !(Maybe Int32)        -- ^ width in EMUs (DOCX wp:extent/@cx)
-  , heightEmuOA    :: !(Maybe Int32)        -- ^ height in EMUs (DOCX wp:extent/@cy)
-  , noteIdOA       :: !(Maybe Int32)        -- ^ footnote/endnote id
-  , noteTypeOA     :: !(Maybe Text)         -- ^ "footnote" | "endnote"
-  , htmlIdOA       :: !(Maybe Text)         -- ^ HTML/Pandoc element id
-  , htmlClassesOA  :: ![Text]               -- ^ HTML/Pandoc classes
-  , htmlAttrsOA    :: !(Map Text Text)      -- ^ arbitrary key/value attrs (data-*)
+  { styleNameOA :: !(Maybe Text)         -- ^ human-readable style name (DOCX)
+  , styleIdOA :: !(Maybe Text)         -- ^ style id (DOCX w:pStyle/@w:val)
+  , numIdOA :: !(Maybe Int32)        -- ^ numbering id (w:numId)
+  , ilvlOA :: !(Maybe Int32)        -- ^ list level (w:ilvl)
+  , numFmtOA :: !(Maybe Text)         -- ^ numbering format (e.g. "decimal", "bullet")
+  , lvlTextOA :: !(Maybe Text)         -- ^ level text pattern (e.g. "%1.%2.")
+  , startAtOA :: !(Maybe Int32)        -- ^ list start at
+  , captionOA :: !(Maybe Text)         -- ^ caption text (figures/tables/images)
+  , imageRidOA :: !(Maybe Text)         -- ^ DOCX relationship id for image
+  , imageNameOA :: !(Maybe Text)         -- ^ image original filename
+  , imageKeyOA :: !(Maybe Text)         -- ^ object-store key for binary asset
+  , widthEmuOA :: !(Maybe Int32)        -- ^ width in EMUs (DOCX wp:extent/@cx)
+  , heightEmuOA :: !(Maybe Int32)        -- ^ height in EMUs (DOCX wp:extent/@cy)
+  , noteIdOA :: !(Maybe Int32)        -- ^ footnote/endnote id
+  , noteTypeOA :: !(Maybe Text)         -- ^ "footnote" | "endnote"
+  , htmlIdOA :: !(Maybe Text)         -- ^ HTML/Pandoc element id
+  , htmlClassesOA :: ![Text]               -- ^ HTML/Pandoc classes
+  , htmlAttrsOA :: !(Map Text Text)      -- ^ arbitrary key/value attrs (data-*)
   } deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 
