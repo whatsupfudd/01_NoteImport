@@ -33,14 +33,6 @@ library
       Commands.OpenAI
       Commands.Version
       DB.Connect
-      DB.OperationsOld
-      DB.StatementsOld
-      DocXOld.Import
-      DocXOld.Logic_v1
-      DocXOld.Pandoc
-      DocXOld.Xml
-      HBDocOld.Structure
-      HBDocOld.Types
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch

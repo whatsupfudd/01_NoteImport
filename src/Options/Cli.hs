@@ -6,7 +6,7 @@ module Options.Cli where
 import Data.Text (Text)
 import Options.Applicative
 
-import HBDoc.Types (EnrichmentLevel (..), StructureSource (..))
+import HBDoc.Core.Types (HBDoc)
 import Options.Types
 
 newtype EnvOptions = EnvOptions {
@@ -133,8 +133,6 @@ ingestOpts =
   IngestOpts
     <$> formatP
     <*> inputP
-    <*> structureP
-    <*> enrichP
     <*> switch (long "keep-original" <> help "Retain original bytes in result")
     <*> optional (strOption (long "title" <> metavar "TEXT" <> help "Override title"))
     <*> optional (strOption (long "format-label" <> metavar "TEXT" <> help "Override format label (default: docx/html/markdown)"))
@@ -164,34 +162,6 @@ ingestOpts =
     inputP =
       (FromFile <$> strOption (long "file" <> short 'i' <> metavar "FILE" <> help "Input file"))
       <|> flag' FromStdin (long "stdin" <> help "Read from stdin")
-
-    structureP :: Parser StructureSource
-    structureP =
-      option (eitherReader toStruct)
-        ( long "structure" <> metavar "pandoc|xml|auto"
-       <> value StructureFromPandoc
-       <> showDefaultWith (const "pandoc")
-       <> help "Choose structural importer for DOCX" )
-      where
-        toStruct = \case
-          "pandoc" -> Right StructureFromPandoc
-          "xml"  -> Right StructureFromXml
-          "auto" -> Right StructureAuto
-          other -> Left $ "Unknown structure: " <> other
-
-    enrichP :: Parser EnrichmentLevel
-    enrichP =
-      option (eitherReader toEnrich)
-        ( long "enrich" <> metavar "none|min|full"
-       <> value EnrichDocxMinimal
-       <> showDefaultWith (const "min")
-       <> help "DOCX XML enrichment level" )
-      where
-        toEnrich = \case
-          "none" -> Right EnrichNone
-          "min"  -> Right EnrichDocxMinimal
-          "full" -> Right EnrichDocxFull
-          other  -> Left $ "Unknown enrich: " <> other
 
     outModeP :: Parser OutMode
     outModeP =

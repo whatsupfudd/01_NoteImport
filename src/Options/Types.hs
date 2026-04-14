@@ -3,7 +3,7 @@
 module Options.Types where
 
 import Data.Text (Text)
-import HBDoc.Types (EnrichmentLevel (..), StructureSource (..))
+import HBDoc.Core.Types (HBDoc)
 
 data Format =
     FDocx
@@ -33,8 +33,6 @@ data DocXOpts = DocXOpts {
 data IngestOpts = IngestOpts
   { format         :: !Format
   , input          :: !Input
-  , structure      :: !StructureSource
-  , enrich         :: !EnrichmentLevel
   , keepOriginal   :: !Bool
   , titleOverride  :: !(Maybe Text)
   , formatLabel    :: !(Maybe Text)

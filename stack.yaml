@@ -6,7 +6,7 @@ packages:
 
 #
 extra-deps:
-  - ../../HBDoc
+  - ../HBDoc2
 
 
 # Control whether we use the GHC we find on the path

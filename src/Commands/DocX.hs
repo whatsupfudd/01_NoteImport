@@ -1,33 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE LambdaCase #-}
 
 {-
-Docx→Blocks — convert .docx to a hierarchical block tree for our HBDS (Hierarchical Block Document System)
----------------------------------------------------------------------------------
-First draft v0.1 (for CTO/dev team review)
-
-Build notes (recommended):
-  • GHC ≥ 9.6
-  • cabal.project uses pandoc 3.x; if you’re pinned to 2.x, see the API compatibility notes below.
-
-Quick start (local):
-  cabal run docx-to-blocks -- --in From\ age_grade\ to\ mastery-driven\ learning\ journeys.docx --out out.json
-
-Executable target name: docx-to-blocks
-
-API compatibility (Pandoc 2.x vs 3.x):
-  • This file targets Pandoc 3.x (Text.Pandoc qualified API). If you need 2.x, replace the imports of
-    Text.Pandoc (runIO, runIOorExplode, def, ReaderOptions, readDocx) accordingly and adjust 'Table' matches.
-
-Design choices (high level):
-  • Parse .docx → Pandoc AST → normalize → assemble a clean Section tree using Header levels.
-  • Paragraphs, lists, list items, tables, quotes, code blocks, figures become children under the nearest header.
-  • Optional promotion: numbered lines like "1) Foo" / "1.2 Bar" can be heuristically promoted to headers (Megaparsec).
-  • Stable IDs: SHA-256 of (path + logical path + text preview) → base16 prefix (8–12 chars) for deterministic IDs.
-  • Records use short postfixes (D,B,I) and OverloadedRecordDot. No RecordWildCards.
-
-Output: JSON — a single root Doc with nested Blocks, suitable for direct ingestion by our HBDS service/UI.
-
+Docx → HBDoc — convert .docx to a hierarchical block tree for our HBDoc (Hierarchical Block Document System)
 -}
 
 module Commands.DocX where
@@ -43,33 +17,40 @@ import qualified Data.Yaml.Pretty as YP
 import qualified Options.Runtime as Rt
 import qualified Options.Types as Opt
 
-import qualified HBDoc.DocX.Simple as Dl
-import qualified HBDoc.Convert.Pandoc as Cp
-import HBDoc.Types (Doc(..))
+import qualified HBDoc.Parse.Structured as Ps
+import HBDoc.Core.Types (HBDoc)
+
+
+type Doc0 = HBDoc () ()
 
 loadDoc :: Opt.DocXOpts -> Rt.RunOptions -> IO ()
 loadDoc opts rtOpts = do
-  eDoc <- Dl.readDocxPandoc opts.inPath
+  eDoc <- Ps.parseDocxFile opts.inPath
   case eDoc of
     Left err -> fail ("Failed to read DOCX: " <> err)
-    Right pandocDoc -> do
-      let
-        d = Cp.buildDoc opts.promote opts.inPath pandocDoc
-      (if opts.asYaml then emitYaml opts.outPath d else emitJson opts.outPath d)
+    Right hbDoc ->
+      if opts.asYaml then
+        emitYaml opts.outPath hbDoc
+      else
+        emitJson opts.outPath hbDoc
 
 
-emitJson :: Maybe FilePath -> Doc -> IO ()
-emitJson mb d = case mb of
-  Nothing -> BL.putStr (AeP.encodePretty' cfg d)
-  Just fp -> BL.writeFile fp (AeP.encodePretty' cfg d)
-  where
-    cfg = AeP.defConfig { AeP.confCompare = AeP.compare }
+emitJson :: Maybe FilePath -> Doc0 -> IO ()
+emitJson mb doc =
+  let
+      cfg = AeP.defConfig { AeP.confCompare = AeP.compare }
+  in
+  case mb of
+    Nothing -> BL.putStr (AeP.encodePretty' cfg doc)
+    Just fp -> BL.writeFile fp (AeP.encodePretty' cfg doc)
 
-emitYaml :: Maybe FilePath -> Doc -> IO ()
+
+emitYaml :: Maybe FilePath -> Doc0 -> IO ()
 emitYaml mb doc = do
-  let val = Ae.toJSON doc
-      cfg = YP.setConfDropNull True YP.defConfig
-      bs  = YP.encodePretty cfg val   -- strict ByteString
+  let
+    val = Ae.toJSON doc
+    cfg = YP.setConfDropNull True YP.defConfig
+    bs  = YP.encodePretty cfg val   -- strict ByteString
   case mb of
     Nothing -> BS.putStr bs
     Just fp -> BS.writeFile fp bs
