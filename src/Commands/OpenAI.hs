@@ -113,9 +113,9 @@ parseJson jsonFile exportB = do
         pure . Right . L.singleton $ jsonConv 
 
 
-printJson :: Opt.OaiJsonOpts -> Opt.TargetsOpts -> IO ()
-printJson jsonOpts targetsOpts = do
-  rezA <- parseJson jsonOpts.jsonFile jsonOpts.exportB
+printJson :: Opt.OaiPrintOpts -> Opt.TargetsOpts -> IO ()
+printJson printOpts targetsOpts = do
+  rezA <- parseJson printOpts.jsonFilePR printOpts.exportPrB
   case rezA of
     Left err -> putStrLn $ "Parsing failed: " ++ err
     Right conversations ->
@@ -129,9 +129,9 @@ printJson jsonOpts targetsOpts = do
           mapM_ showConversation targetConvrs
 
 
-storeJsonAsConversations :: Opt.OaiJsonOpts -> Opt.TargetsOpts -> Rto.RunOptions -> IO ()
-storeJsonAsConversations jsonOpts targetsOpts rtOpts = do
-  rezA <- parseJson jsonOpts.jsonFile jsonOpts.exportB
+storeJsonAsConversations :: Opt.OaiStoreOpts -> Opt.TargetsOpts -> Rto.RunOptions -> IO ()
+storeJsonAsConversations storeOpts targetsOpts rtOpts = do
+  rezA <- parseJson storeOpts.jsonFileST storeOpts.exportB
   case rezA of
     Left err -> putStrLn $ "Parsing failed: " ++ err
     Right conversations ->
@@ -145,9 +145,12 @@ storeJsonAsConversations jsonOpts targetsOpts rtOpts = do
               targetConvrs = Mp.restrictKeys orgMap (Set.fromList targets)
             in
             Mp.elems targetConvrs
-      in do
-      rezA <- Mc.runContT pgPool (saveConversations targetConv)
-      reportDbErrors "storeJsonAsConversations" rezA
+      in
+      if storeOpts.dryRunB then do
+        rezA <- Mc.runContT pgPool (saveConversations targetConv)
+        reportDbErrors "storeJsonAsConversations" rezA
+      else
+        putStrLn $ "@[storeJsonAsConversations] dry run, not saving."
 
 
 reportDbErrors :: String -> Either [Hp.UsageError] (Either [String] [resultT]) -> IO ()

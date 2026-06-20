@@ -193,15 +193,24 @@ oaiSubCommands =
 jsonSubCommands :: Parser JsonSubCommand
 jsonSubCommands =
   subparser (
-    command "print" (info (PrintJS <$> oaiJsonOpts <*> oaiTargetsOpts) (progDesc "Print the JSON to the console."))
-    <> command "store" (info (StoreJS <$> oaiJsonOpts <*> oaiTargetsOpts) (progDesc "Store the JSON to the database."))
+    command "print" (info (PrintJS <$> oaiPrintOpts <*> oaiTargetsOpts) (progDesc "Print the JSON to the console."))
+    <> command "store" (info (StoreJS <$> oaiStoreOpts <*> oaiTargetsOpts) (progDesc "Store the JSON to the database."))
   )
 
-oaiJsonOpts :: Parser OaiJsonOpts
-oaiJsonOpts =
-  OaiJsonOpts <$>
+oaiPrintOpts :: Parser OaiPrintOpts
+oaiPrintOpts =
+  OaiPrintOpts <$>
     switch (long "export" <> short 'e' <> help "Comes from the OpenAI export service." <> showDefault)
     <*> strArgument (metavar "JSONFILE" <> help "JSON file file path")
+
+oaiStoreOpts :: Parser OaiStoreOpts
+oaiStoreOpts =
+  OaiStoreOpts <$>
+    switch (long "export" <> short 'e' <> help "Comes from the OpenAI export service." <> showDefault)
+    <*> switch (long "summarise" <> short 's' <> help "Perform summarisation of the conversations." <> showDefault)
+    <*> switch (long "dry-run" <> short 'd' <> help "Perform a dry run." <> showDefault)
+    <*> strArgument (metavar "JSONFILE" <> help "JSON file file path")
+
 
 oaiTargetsOpts :: Parser TargetsOpts
 oaiTargetsOpts =

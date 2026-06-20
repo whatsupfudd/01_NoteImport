@@ -54,14 +54,22 @@ data OaiSubCommand =
 
 
 data JsonSubCommand =
-  PrintJS OaiJsonOpts TargetsOpts
-  | StoreJS OaiJsonOpts TargetsOpts
+  PrintJS OaiPrintOpts TargetsOpts
+  | StoreJS OaiStoreOpts TargetsOpts
   deriving stock (Show)
 
-data OaiJsonOpts = OaiJsonOpts {
-  exportB :: !Bool
-  , jsonFile :: !FilePath
+data OaiPrintOpts = OaiPrintOpts {
+  exportPrB :: !Bool
+  , jsonFilePR :: FilePath
   } deriving stock (Show)
+
+data OaiStoreOpts = OaiStoreOpts {
+  exportB :: !Bool
+  , summariseB :: !Bool
+  , dryRunB :: !Bool
+  , jsonFileST :: !FilePath
+  } deriving stock (Show)
+
 
 data TargetsOpts = TargetsOpts {
     targetsTO :: [Text]
