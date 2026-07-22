@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -46,15 +46,30 @@ library
       OpenAI.Generate.DocxDb
       OpenAI.Generate.DocxGeneral
       OpenAI.Generate.Elmify
+      OpenAI.Id
+      OpenAI.Import.Batch
+      OpenAI.Import.Decide
+      OpenAI.Import.Discussion
+      OpenAI.Import.Incremental
+      OpenAI.Import.Lookup
+      OpenAI.Import.Raw
+      OpenAI.Import.Report
+      OpenAI.Import.Run
+      OpenAI.Import.Summary
+      OpenAI.Import.Types
       OpenAI.Json.Reader
+      OpenAI.Order
       OpenAI.Parse
       OpenAI.ProjFetcher
+      OpenAI.Serialize.Content
       OpenAI.Serialize.Conversation
       OpenAI.Serialize.ConversationStmt
       OpenAI.Serialize.Discussion
+      OpenAI.Serialize.DiscussionIncr
       OpenAI.Serialize.DiscussionStmt
       OpenAI.Serialize.IncrUpdate
       OpenAI.Summarisation
+      OpenAI.Time
       OpenAI.Types
       OpenAI.Utils
       Options

@@ -8,8 +8,10 @@ CREATE TABLE IF NOT EXISTS conversations (
   , eid uuid NOT NULL
   , create_time timestamptz NOT NULL
   , update_time timestamptz NOT NULL
+  , constraint conversations_eid_unique unique (eid)
 );
 create unique index if not exists conversations_eid_uq on conversations(eid);
+
 
 
 CREATE TABLE IF NOT EXISTS nodes (
@@ -18,11 +20,16 @@ CREATE TABLE IF NOT EXISTS nodes (
   , eid uuid NOT NULL
   , parent_fk BIGINT REFERENCES nodes(uid)
   , seqnbr int not null default 0
+  , preorder_seq int4
+  , child_seq int4
+  , constraint nodes_conversation_eid_unique unique (conversation_fk, eid)
 );
 create unique index if not exists nodes_conversation_seq_uq
   on nodes(conversation_fk, seqnbr);
 create unique index if not exists nodes_conversation_eid_uq on nodes(conversation_fk, eid);
 create index if not exists nodes_conversation_parent_idx on nodes(conversation_fk, parent_fk);
+create unique index nodes_preorder_unique on nodes(conversation_fk, preorder_seq);
+create unique index nodes_child_order_unique on nodes(conversation_fk, parent_fk, child_seq);
 
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -38,7 +45,19 @@ CREATE TABLE IF NOT EXISTS messages (
   , recipient TEXT NOT NULL
   , channel TEXT
   , seqnbr int not null default 0
+  , constraint messages_node_eid_unique unique (node_fk, eid)
 );
+
+
+create table oai.message_previous (
+  message_fk bigint not null references oai.messages(uid)
+  , update_time float8
+  , content_hash bytea not null
+  , payload jsonb not null
+  , recorded_at timestamptz not null default now()
+  );
+
+
 
 CREATE TABLE IF NOT EXISTS authors (
   uid BIGSERIAL PRIMARY KEY,
@@ -250,26 +269,6 @@ CREATE TABLE IF NOT EXISTS metadatas_audioasset (
   , primary key (assetptr_fk, part_kind)
 );
 
-create table if not exists oai.conversation_ingest (
-  uid bigserial primary key
-  , conversation_fk bigint not null references oai.conversations(uid) on delete cascade
-
-  -- identity for idempotency (choose what you have):
-  , source_key text                 -- e.g. filename, object-store key, or export-id
-  , source_sha256 bytea             -- hash of raw json (best)
-  , imported_at timestamptz not null default now()
-  , ingest_type text not null    -- export, single-file.
-  , unique (conversation_fk, source_sha256)
-);
-
-
-create table if not exists oai.conversation_previous (
-  uid bigserial primary key
-  , conversation_fk bigint not null references oai.conversations(uid) on delete cascade
-  , update_time timestamptz not null
-  , title text not null
-  , unique (conversation_fk, update_time)
-);
 
 CREATE TABLE IF NOT EXISTS conversation_group (
   uid BIGSERIAL PRIMARY KEY
@@ -287,3 +286,27 @@ create table if not exists conversation_group_member (
 
 create index if not exists conversation_group_member_cgroup_fk_idx on conversation_group_member (conversation_group_fk);
 create index if not exists conversation_group_member_conversation_fk_idx on conversation_group_member (conversation_fk);
+
+
+-- Support for incremental ingestion.
+create table if not exists conversation_ingest (
+  uid bigserial primary key
+  , conversation_fk bigint not null references conversations(uid) on delete cascade
+
+  -- identity for idempotency (choose what you have):
+  , source_key text                 -- e.g. filename, object-store key, or export-id
+  , source_sha256 bytea             -- hash of raw json (best)
+  , imported_at timestamptz not null default now()
+  , ingest_type text not null    -- export, single-file.
+  , unique (conversation_fk, source_sha256)
+);
+
+
+create table if not exists conversation_previous (
+  uid bigserial primary key
+  , conversation_fk bigint not null references conversations(uid) on delete cascade
+  , update_time double precision not null
+  , title text not null
+  , unique (conversation_fk, update_time)
+);
+

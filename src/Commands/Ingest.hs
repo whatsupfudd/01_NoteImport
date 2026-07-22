@@ -46,7 +46,7 @@ import qualified HBDoc.Core.Build as Cb
 import qualified HBDoc.Render.PrettyPrint as Pp
 
 type Doc0 = HBDoc () ()
-type DataResult a = Either String a
+
 data ImportResult = ImportResult {
     originalBytes :: Maybe BL.ByteString
   , warnings :: [Text]
@@ -82,21 +82,20 @@ runIngest opts rtOpts = do
           , originalName = case opts.input of
                 Opt.FromFile fp -> T.pack (takeFileName fp)
                 Opt.FromStdin -> "<anonymous-stdin>"
-            , document = importResult.document
-            }
+          , document = importResult.document
+          , debugFlag = 1
+          }
 
       rezA <- Mc.runContT pgPool (mainAction sInfo)
       case rezA of
-        Left err -> do
+        Left err ->
           putStrLn $ "@[runIngest] serialization failed: " <> show err
-          pure ()
-        Right apiRez -> do
-          pure ()
+        Right apiRez -> pure ()
   where
-  mainAction :: SerializeInfo docT blkT -> Pool -> IO (Either String (DataResult Int64))
+  mainAction :: SerializeInfo docT blkT -> Pool -> IO (Either String Int64)
   mainAction sInfo dbPool = do
     rezB <- Sw.serializeDocument dbPool sInfo
-    putStrLn "@[runIngest] serialization done."
+    putStrLn "@[runIngest] serialzeDocument: done."
     pure rezB
 
 

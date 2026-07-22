@@ -3,17 +3,11 @@
 -- | Convert a DB-deserialised OpenAI conversation ('ConversationDb') into the
 -- legacy / JSON-derived flat 'Context' representation.
 --
--- This mirrors the FSM logic in 'OpenAI.Parse' (analyzeDiscussion/runFSM/...)
--- as closely as possible.
+-- This mirrors the FSM logic in 'OpenAI.Parse' as closely as possible.
 --
--- IMPORTANT ABOUT ORDERING
--- ------------------------
--- In the JSON form, each node contains an explicit ordered list of children.
--- In the DB schema for 'oai.nodes', that child ordering is not stored.
---
--- Therefore we approximate the traversal order by sorting children by their
--- node uid (ascending) per parent. This gives a deterministic, stable order
--- and tends to match insertion order in practice.
+-- JSON child order is persisted in @oai.nodes.child_seq@ / @preorder_seq@.
+-- Traversal uses @child_seq@ within each parent, with @preorder_seq@ and node
+-- UID as deterministic tie-breakers.
 module OpenAI.ConvToDisc
   ( analyzeConversation
   ) where
@@ -21,7 +15,6 @@ module OpenAI.ConvToDisc
 import Data.Aeson (Value)
 import qualified Data.Aeson as Ae
 import qualified Data.ByteString.Lazy as BL
-import Data.Int (Int64)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
 import Data.Map.Strict (Map)
@@ -38,7 +31,7 @@ import OpenAI.Types
 -- | Entry point equivalent to 'OpenAI.Parse.analyzeDiscussion'.
 --
 -- Returns:
---   * Right Context on success (with any non-fatal issues recorded in ctx.issues)
+--   * Right Context on success, with non-fatal issues recorded in ctx.issues
 --   * Left <err> only when the conversation is structurally impossible to traverse
 --
 -- NOTE: Like the JSON-derived implementation, messages are accumulated by
@@ -48,20 +41,22 @@ analyzeConversation :: Cv.ConversationDb -> Either Text Context
 analyzeConversation conv =
   let
     mapping = conv.nodesCv
-    (childMap, orphanIssues) = buildChildMap mapping
+    (childMap, orderIssues) = buildChildMap mapping
     mbRoot = findRootNode mapping
-    initCtxt = Context
-      { messages = []
-      , currentMsg = Nothing
-      , issues = orphanIssues
-      }
+    initCtxt =
+      Context
+        { messages = []
+        , currentMsg = Nothing
+        , issues = orderIssues
+        }
   in
-  case mbRoot of
-    Nothing ->
-      Left $ "@[analyzeConversation] no root node found for conversation: "
-          <> conv.titleCv <> ", eid: " <> conv.eidCv
-    Just rootNode ->
-      Right $ runFSM initCtxt mapping childMap (rootNode.eidNd)
+    case mbRoot of
+      Nothing ->
+        Left $
+          "@[analyzeConversation] no root node found for conversation: "
+            <> conv.titleCv <> ", eid: " <> conv.eidCv
+      Just rootNode ->
+        Right $ runFSM initCtxt mapping childMap rootNode.eidNd
 
 
 -- -----------------------------
@@ -73,41 +68,55 @@ findRootNode mapping =
   case Mp.lookup "client-created-root" mapping of
     Just node -> Just node
     Nothing ->
-      -- Map.elems is deterministic (ordered by key), similar to the JSON logic.
-      L.find (isNothing . Cv.parentFkNd) (Mp.elems mapping)
+      L.find (\node -> isNothing node.parentFkNd) (Mp.elems mapping)
 
 -- | Build parent->children adjacency lists.
 --
--- Returns (childMap, issuesAboutOrphans).
+-- Returns @(childMap, issuesAboutOrphans)@.
 --
--- The returned child lists are ordered by child node uid ascending.
+-- Child lists are ordered by:
+--
+--   1. @child_seq@
+--   2. @preorder_seq@
+--   3. node UID
+--
+-- This preserves the JSON child ordering persisted in the DB.
 buildChildMap :: Map Text Cv.NodeDb -> (Map Text [Text], [Text])
 buildChildMap mapping =
   let
-    nodesAsc = L.sortOn Cv.uidNd (Mp.elems mapping)
-    uidToEid = Mp.fromList [ (Cv.uidNd n, Cv.eidNd n) | n <- nodesAsc ]
+    nodesOrd = L.sortOn orderKeyNd (Mp.elems mapping)
+    eidByUid = Mp.fromList [ (node.uidNd, node.eidNd) | node <- nodesOrd ]
 
-    step (m, iss) n =
-      case Cv.parentFkNd n of
-        Nothing -> (m, iss)
-        Just pUid ->
-          case Mp.lookup pUid uidToEid of
+    step :: (Map Text [Text], [Text]) -> Cv.NodeDb -> (Map Text [Text], [Text])
+    step (childMap, issuesRev) node =
+      case node.parentFkNd of
+        Nothing ->
+          (childMap, issuesRev)
+
+        Just parentUid ->
+          case Mp.lookup parentUid eidByUid of
             Nothing ->
-              -- Orphan / missing parent reference.
-              ( m
-              , ("@[buildChildMap] node has missing parent_fk: node=" <> Cv.eidNd n <> ", parent_uid=" <> T.pack (show pUid))
-                : iss
-              )
-            Just pEid ->
-              -- insertWith f k new map: f new old
-              -- We want stable append (old ++ new).
-              ( Mp.insertWith (flip (++)) pEid [Cv.eidNd n] m
-              , iss
+              ( childMap
+              , ("@[buildChildMap] node has missing parent_fk: node=" <> node.eidNd <> ", parent_uid=" <> showText parentUid)
+                  : issuesRev
               )
 
-    (cm, issuesRev) = L.foldl' step (Mp.empty, []) nodesAsc
+            Just parentEid ->
+              ( Mp.insertWith (flip (++)) parentEid [node.eidNd] childMap
+              , issuesRev
+              )
+
+    (childMap, issuesRev) = L.foldl' step (Mp.empty, []) nodesOrd
   in
-    (cm, reverse issuesRev)
+    (childMap, reverse issuesRev)
+
+orderKeyNd :: Cv.NodeDb -> (Maybe Int, Int, Int, Int)
+orderKeyNd node =
+  ( fromIntegral <$> node.parentFkNd
+  , fromIntegral node.seqChildNd
+  , fromIntegral node.seqPreNd
+  , fromIntegral node.uidNd
+  )
 
 
 -- -----------------------------
@@ -119,23 +128,25 @@ runFSM context mapping childMap nodeEid =
   case Mp.lookup nodeEid mapping of
     Nothing ->
       context { issues = ("node not found: " <> nodeEid) : context.issues }
+
     Just node ->
       let
         updCtxt =
-          case Cv.messageNd node of
+          case node.messageNd of
             Nothing -> context
             Just msg ->
-              case T.toLower (Cv.roleAu (Cv.authorMsg msg)) of
+              case T.toLower msg.authorMsg.roleAu of
                 "user" -> handleUserMsg context msg
                 "assistant" -> handleAssistantMsg context msg
                 "system" -> handleSystemMsg context msg
                 "tool" -> handleToolMsg context msg
-                other -> context { issues = ("unknown role: " <> other) : context.issues }
+                other ->
+                  context { issues = ("unknown role: " <> other) : context.issues }
 
         children = Mp.findWithDefault [] nodeEid childMap
       in
-        -- foldr preserves the list order (child1, child2, child3...)
-        foldr (\childId acc -> runFSM acc mapping childMap childId) updCtxt children
+        -- foldl' walks child1, child2, child3 in persisted JSON order.
+        L.foldl' (\acc childId -> runFSM acc mapping childMap childId) updCtxt children
 
 
 -- -----------------------------
@@ -144,53 +155,59 @@ runFSM context mapping childMap nodeEid =
 
 handleUserMsg :: Context -> Cv.MessageDb -> Context
 handleUserMsg context msg =
-  case firstTextContent (Cv.contentsMsg msg) of
+  case firstTextContent msg.contentsMsg of
     Just partsV ->
       let
-        userMsg = UserMessage
-          { textUM = T.intercalate " |<part>| " (V.toList partsV)
-          , attachmentsUM = []
-          }
-        timing = Timing
-          { createTime = Cv.createTimeMsg msg
-          , updateTime = Cv.updateTimeMsg msg
-          }
+        userMsg =
+          UserMessage
+            { textUM = T.intercalate " |<part>| " (V.toList partsV)
+            , attachmentsUM = []
+            }
+
+        timing =
+          Timing
+            { createTime = msg.createTimeMsg
+            , updateTime = msg.updateTimeMsg
+            }
       in
         context { messages = UserMF timing userMsg : context.messages }
+
     Nothing ->
       context
         { issues =
-            ( "user msg eid: " <> Cv.eidMsg msg
-              <> " missing TextCT content; contents=" <> summarizeContents (Cv.contentsMsg msg)
+            ( "user msg eid: " <> msg.eidMsg
+                <> " missing TextCT content; contents=" <> summarizeContents msg.contentsMsg
             )
-            : context.issues
+              : context.issues
         }
 
 
 handleAssistantMsg :: Context -> Cv.MessageDb -> Context
 handleAssistantMsg context msg =
   let
-    timing = Timing
-      { createTime = Cv.createTimeMsg msg
-      , updateTime = Cv.updateTimeMsg msg
-      }
-    contents = V.toList (Cv.contentsMsg msg)
+    timing =
+      Timing
+        { createTime = msg.createTimeMsg
+        , updateTime = msg.updateTimeMsg
+        }
+
+    contents = V.toList msg.contentsMsg
   in
-    if Cv.endTurnMsg msg == Just True
+    if msg.endTurnMsg == Just True
       then
-        -- If the DB message carries multiple content entries, treat all but the
-        -- last as sub-actions, then use the last as the final response.
         case contents of
-          [] -> finalizeAssistant context timing msg Nothing
+          [] ->
+            finalizeAssistant context timing msg Nothing
+
           _ ->
             let
               prefix = init contents
-              lastC  = last contents
-              ctx1 = L.foldl' (\c ct -> applyAssistantContent c timing msg ct) context prefix
+              lastC = last contents
+              ctx1 = L.foldl' (\acc contentDb -> applyAssistantContent acc timing msg contentDb) context prefix
             in
               finalizeAssistant ctx1 timing msg (Just lastC)
       else
-        L.foldl' (\c ct -> applyAssistantContent c timing msg ct) context contents
+        L.foldl' (\acc contentDb -> applyAssistantContent acc timing msg contentDb) context contents
 
 
 finalizeAssistant :: Context -> Timing -> Cv.MessageDb -> Maybe Cv.ContentDb -> Context
@@ -199,19 +216,23 @@ finalizeAssistant context _timing msg mbFinalContent =
     resp =
       case mbFinalContent of
         Nothing -> ResponseAst { textRA = "No response" }
-        Just c  -> buildAssistantResponse c
-
+        Just contentDb -> buildAssistantResponse contentDb
   in
     case context.currentMsg of
       Nothing ->
         let
-          assistantMsg = AssistantMessage
-            { response = Just resp
-            , attachmentsAM = []
-            , subActions = []
-            }
-          -- Use the message timing as in the JSON path.
-          timing = Timing { createTime = Cv.createTimeMsg msg, updateTime = Cv.updateTimeMsg msg }
+          assistantMsg =
+            AssistantMessage
+              { response = Just resp
+              , attachmentsAM = []
+              , subActions = []
+              }
+
+          timing =
+            Timing
+              { createTime = msg.createTimeMsg
+              , updateTime = msg.updateTimeMsg
+              }
         in
           context { messages = AssistantMF timing assistantMsg : context.messages }
 
@@ -219,13 +240,14 @@ finalizeAssistant context _timing msg mbFinalContent =
         let
           updMsg =
             case astMsg of
-              AssistantMF t prevMsg ->
-                AssistantMF t prevMsg
+              AssistantMF timing prevMsg ->
+                AssistantMF timing prevMsg
                   { subActions = reverse prevMsg.subActions
                   , response = Just resp
                   }
-              -- Keep permissive behaviour from JSON implementation.
-              _ -> astMsg
+
+              _ ->
+                astMsg
         in
           context { messages = updMsg : context.messages, currentMsg = Nothing }
 
@@ -242,17 +264,19 @@ applyAssistantContent context timing msg = \case
     thoughtsP context timing msg srcAnalysis (V.toList thoughtsV)
 
   -- Mirror Parse: other assistant content types are currently ignored in the FSM.
-  _ -> context
+  _ ->
+    context
 
 
 codeP :: Context -> Timing -> Cv.MessageDb -> Text -> Maybe Text -> Text -> Context
 codeP context timing msg language responseFormatName text =
   let
-    subAction = CodeSA Code
-      { languageCC = language
-      , responseFormatNameCC = responseFormatName
-      , textCC = text
-      }
+    subAction =
+      CodeSA Code
+        { languageCC = language
+        , responseFormatNameCC = responseFormatName
+        , textCC = text
+        }
 
     eiNewMsg =
       case context.currentMsg of
@@ -260,15 +284,21 @@ codeP context timing msg language responseFormatName text =
           case prevMsg of
             AssistantMF t assistantMsg ->
               Right $ AssistantMF t assistantMsg { subActions = subAction : assistantMsg.subActions }
-            _ ->
-              Left $ "assistant msg eid: " <> Cv.eidMsg msg <> " is not an assistant message: " <> T.pack (show prevMsg)
-        Nothing ->
-          Right $ AssistantMF timing (AssistantMessage
-            { response = Just (buildAssistantResponse (Cv.CodeCT_Db language responseFormatName text))
-            , attachmentsAM = []
-            , subActions = [subAction]
-            })
 
+            _ ->
+              Left $
+                "assistant msg eid: " <> msg.eidMsg
+                  <> " is not an assistant message: " <> T.pack (show prevMsg)
+
+        Nothing ->
+          Right $
+            AssistantMF timing
+              (AssistantMessage
+                { response = Just (buildAssistantResponse (Cv.CodeCT_Db language responseFormatName text))
+                , attachmentsAM = []
+                , subActions = [subAction]
+                }
+              )
   in
     case eiNewMsg of
       Left errMsg -> context { issues = errMsg : context.issues }
@@ -286,15 +316,21 @@ textP context timing msg parts =
           case prevMsg of
             AssistantMF t assistantMsg ->
               Right $ AssistantMF t assistantMsg { subActions = subAction : assistantMsg.subActions }
-            _ ->
-              Left $ "assistant msg eid: " <> Cv.eidMsg msg <> " is not an assistant message: " <> T.pack (show prevMsg)
-        Nothing ->
-          Right $ AssistantMF timing (AssistantMessage
-            { response = Just (buildAssistantResponse (Cv.TextCT_Db (V.fromList parts)))
-            , attachmentsAM = []
-            , subActions = [subAction]
-            })
 
+            _ ->
+              Left $
+                "assistant msg eid: " <> msg.eidMsg
+                  <> " is not an assistant message: " <> T.pack (show prevMsg)
+
+        Nothing ->
+          Right $
+            AssistantMF timing
+              (AssistantMessage
+                { response = Just (buildAssistantResponse (Cv.TextCT_Db (V.fromList parts)))
+                , attachmentsAM = []
+                , subActions = [subAction]
+                }
+              )
   in
     case eiNewMsg of
       Left errMsg -> context { issues = errMsg : context.issues }
@@ -312,8 +348,8 @@ thoughtsP context timing msg _sourceAnalysisMsgId thoughts =
           ReflectionSA Reflection
             { summaryRF = aThought.summaryTh
             , contentRF = aThought.contentTh
-            , chunksRF = decodeChunks (aThought.chunksTh)
-            , finishedRF = Just (aThought.finishedTh)
+            , chunksRF = decodeChunks aThought.chunksTh
+            , finishedRF = Just aThought.finishedTh
             }
         )
         (reverse thoughts)
@@ -324,15 +360,21 @@ thoughtsP context timing msg _sourceAnalysisMsgId thoughts =
           case prevMsg of
             AssistantMF t assistantMsg ->
               Right $ AssistantMF t assistantMsg { subActions = subActions <> assistantMsg.subActions }
-            _ ->
-              Left $ "assistant msg eid: " <> Cv.eidMsg msg <> " is not an assistant message: " <> T.pack (show prevMsg)
-        Nothing ->
-          Right $ AssistantMF timing (AssistantMessage
-            { response = Just (buildAssistantResponse (Cv.ThoughtsCT_Db "" (V.fromList thoughts)))
-            , attachmentsAM = []
-            , subActions = subActions
-            })
 
+            _ ->
+              Left $
+                "assistant msg eid: " <> msg.eidMsg
+                  <> " is not an assistant message: " <> T.pack (show prevMsg)
+
+        Nothing ->
+          Right $
+            AssistantMF timing
+              (AssistantMessage
+                { response = Just (buildAssistantResponse (Cv.ThoughtsCT_Db "" (V.fromList thoughts)))
+                , attachmentsAM = []
+                , subActions = subActions
+                }
+              )
   in
     case eiNewMsg of
       Left errMsg -> context { issues = errMsg : context.issues }
@@ -342,13 +384,16 @@ thoughtsP context timing msg _sourceAnalysisMsgId thoughts =
 handleSystemMsg :: Context -> Cv.MessageDb -> Context
 handleSystemMsg context msg =
   let
-    systemMsg = SystemMessage
-      { textSM = summarizeContents (Cv.contentsMsg msg)
-      }
-    timing = Timing
-      { createTime = Cv.createTimeMsg msg
-      , updateTime = Cv.updateTimeMsg msg
-      }
+    systemMsg =
+      SystemMessage
+        { textSM = summarizeContents msg.contentsMsg
+        }
+
+    timing =
+      Timing
+        { createTime = msg.createTimeMsg
+        , updateTime = msg.updateTimeMsg
+        }
   in
     context { messages = SystemMF timing systemMsg : context.messages }
 
@@ -356,13 +401,16 @@ handleSystemMsg context msg =
 handleToolMsg :: Context -> Cv.MessageDb -> Context
 handleToolMsg context msg =
   let
-    toolMsg = ToolMessage
-      { textTM = summarizeContents (Cv.contentsMsg msg)
-      }
-    timing = Timing
-      { createTime = Cv.createTimeMsg msg
-      , updateTime = Cv.updateTimeMsg msg
-      }
+    toolMsg =
+      ToolMessage
+        { textTM = summarizeContents msg.contentsMsg
+        }
+
+    timing =
+      Timing
+        { createTime = msg.createTimeMsg
+        , updateTime = msg.updateTimeMsg
+        }
   in
     context { messages = ToolMF timing toolMsg : context.messages }
 
@@ -430,20 +478,21 @@ respFromContent = \case
 -- -----------------------------
 
 firstTextContent :: V.Vector Cv.ContentDb -> Maybe (V.Vector Text)
-firstTextContent cs =
-  let xs = V.toList cs
-  in case L.find isTextCT xs of
-      Just (Cv.TextCT_Db v) -> Just v
-      _ -> Nothing
+firstTextContent contents =
+  case L.find isTextCT (V.toList contents) of
+    Just (Cv.TextCT_Db partsV) -> Just partsV
+    _ -> Nothing
   where
-    isTextCT (Cv.TextCT_Db _) = True
-    isTextCT _               = False
+    isTextCT = \case
+      Cv.TextCT_Db{} -> True
+      _ -> False
 
 summarizeContents :: V.Vector Cv.ContentDb -> Text
-summarizeContents cs =
-  -- Keep it conservative: avoid exploding huge JSON; still deterministic.
-  let tags = V.toList (V.map contentTag cs)
-  in "contents=" <> T.intercalate "," tags
+summarizeContents contents =
+  let
+    tags = map contentTag (V.toList contents)
+  in
+    "contents=" <> T.intercalate "," tags
 
 contentTag :: Cv.ContentDb -> Text
 contentTag = \case
@@ -460,13 +509,20 @@ contentTag = \case
   Cv.UnknownCT_Db ct _ -> "unknown:" <> ct
 
 fromMaybeText :: Text -> Maybe Text -> Text
-fromMaybeText def = maybe def id
+fromMaybeText def mbTxt =
+  maybe def id mbTxt
 
 jsonValueToText :: Value -> Text
-jsonValueToText = TE.decodeUtf8 . BL.toStrict . Ae.encode
+jsonValueToText =
+  TE.decodeUtf8 . BL.toStrict . Ae.encode
 
 decodeChunks :: Value -> [Text]
 decodeChunks v =
   case Ae.fromJSON v :: Ae.Result [Value] of
     Ae.Success xs -> map (T.pack . show) xs
     Ae.Error _ -> [jsonValueToText v]
+
+showText :: Show a => a -> Text
+showText =
+  T.pack . show
+

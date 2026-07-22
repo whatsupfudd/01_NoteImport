@@ -1,384 +1,409 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
-module OpenAI.Serialize.IncrUpdate ( incrUpdateConversation )
-where
+{-# LANGUAGE DerivingStrategies #-}
 
--- | Incremental update of an already-existing conversation in Postgres.
---
--- Assumptions / goals:
---   * The caller already validated the conversation exists in DB (not first entry).
---   * In practice, exported conversations are linear chains (one child per node).
---   * We only insert NEW tail nodes + their message trees (messages/authors/contents/...).
---   * We still update the top-level conversation title/update_time.
---   * We record the prior top-level state in 'oai.conversation_previous'.
---   * We append a trace row in 'oai.conversation_ingest' at the end.
---   * All of the above is wrapped in one transaction.
---
--- Notes:
---   * This module uses conservative per-row inserts; incremental batches are typically small.
---   * If you later want "mid-chain" edits or re-writes, add hashing + selective rewrite.
+module OpenAI.Serialize.IncrUpdate
+  ( ReportRaw(..)
+  , updateConversation
+  ) where
 
 import Control.Monad (forM_, when)
-import Control.Exception (Exception, throwIO)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
-
+import Data.Aeson (Value)
+import qualified Data.Aeson as Ae
+import qualified Data.ByteArray as BA
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.HashMap.Strict as HM
 import Data.Int (Int32, Int64)
-import Data.List (sort)
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Mp
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Clock (UTCTime)
-import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Data.Time.Format (defaultTimeLocale, parseTimeM)
-import Data.UUID (UUID)
-import qualified Data.UUID as UUID
 import qualified Data.Vector as V
-
-import qualified Data.Aeson as Ae
-import Data.Aeson (Value)
-
-import qualified Hasql.Pool as Pool
-
+import qualified Crypto.Hash as CH
+import qualified Hasql.Pool as Hp
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
--- cryptonite (recommended). If you prefer another SHA256 lib, replace 'sha256'.
-import qualified Crypto.Hash as CH
-import qualified Data.ByteArray as BA
-
-import qualified OpenAI.Json.Reader as Jd
 import qualified OpenAI.Deserialize.ConversationStmt as Dcv
+import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Order as Oor
 import qualified OpenAI.Serialize.ConversationStmt as Scv
 
+data ReportRaw = ReportRaw
+  { uidConv :: Int64
+  , nodeAddedCnt :: Int
+  , msgAddedCnt :: Int
+  , titleChanged :: Bool
+  , sameRaw :: Bool
+  , notesRaw :: [Text]
+  }
+  deriving stock (Eq, Show)
 
--- ----------------------------
--- Public API
--- ----------------------------
+data AddStat = AddStat
+  { nodeAddedCntAS :: Int
+  , msgAddedCntAS :: Int
+  }
+  deriving stock (Eq, Show)
 
+emptyAddStat :: AddStat
+emptyAddStat = AddStat { nodeAddedCntAS = 0, msgAddedCntAS = 0 }
 
--- | Incrementally update an already-existing conversation.
---
--- * 'sourceKey' is recorded in 'oai.conversation_ingest.source_key'.
--- * The function inserts a 'oai.conversation_previous' snapshot (title/update_time)
---   and then applies the new state.
---
--- Returns Left <err> on failure, Right () on success.
-incrUpdateConversation :: Pool.Pool -> Jd.Conversation -> Text -> IO (Either String ())
-incrUpdateConversation pool conv sourceKey = do
-  r <- Pool.use pool $
-    TxS.transaction TxS.ReadCommitted TxS.Write $ incrUpdateTx conv sourceKey
-  pure $ case r of
-    Left e -> Left (show e)
-    Right rez -> Right ()
-
-
--- ----------------------------
--- Transaction orchestration
--- ----------------------------
-
-
-incrUpdateTx :: Jd.Conversation -> Text -> Tx.Transaction (Either String ())
-incrUpdateTx conv sourceKey = do
-  -- 1) Resolve conversation row + lock it.
-  convEid <- either (pure . Left) (pure . Right) (toUuid conv.convIdCv)
-  case convEid of
-    Left e -> pure (Left e)
-    Right ceid -> do
-      mb <- Tx.statement ceid Dcv.selectConversationForUpdate
-      case mb of
-        Nothing -> pure (Left "@[incrUpdateTx] conversation not found (expected existing)")
-        Just (cUid, oldTitle, oldUpd) -> do
-          -- 2) Store previous top-level state.
-          Tx.statement (cUid, oldUpd, oldTitle) Scv.insertConversationPrevious
-
-          -- 3) Update top-level row.
-          newUpd <- either (pure . Left) (pure . Right) (toUtc conv.updateTimeCv)
-          case newUpd of
-            Left e -> pure (Left e)
-            Right newUpdAt -> do
-              Tx.statement (conv.titleCv, newUpdAt, cUid) Scv.updateConversation
-
-              -- 4) Find last node seq + uid.
-              maxSeq <- Tx.statement cUid Dcv.selectMaxNodeSeq
-              when (maxSeq < 0) $ do
-                Tx.condemn
-                -- pure $ Left "@[incrUpdateTx] max seq < 0"
-
-              mbLastNodeUid <- Tx.statement (cUid, maxSeq) Dcv.selectNodeUidBySeq
-              case mbLastNodeUid of
-                Nothing -> do
-                   Tx.condemn
-                   pure $ Left "@[incrUpdateTx] last node uid not found for max seq"
-                Just lastNodeUid -> do
-                  -- 5) Linearize incoming nodes into deterministic chain order.
-                  orderedNodeIds <-
-                    either (pure . Left) (pure . Right) (linearizeNodeChain conv.mappingCv)
-                  case orderedNodeIds of
-                    Left e -> pure (Left (T.unpack e))
-                    Right nodeIds -> do
-                      let startIdx :: Int
-                          startIdx = fromIntegral maxSeq + 1
-
-                          newTail = drop startIdx nodeIds
-
-                      -- 6) Insert new tail nodes + message trees.
-                      ei <- insertTail cUid lastNodeUid startIdx conv.mappingCv newTail
-                      case ei of
-                        Left e -> pure (Left e)
-                        Right () -> do
-                          -- 7) Trace ingest.
-                          let sha = sha256 (Ae.encode conv)
-                          Tx.statement (cUid, Just sourceKey, Just sha, ("single-file" :: Text)) Scv.insertConversationIngest
-                          pure $ Right ()
-
-
-insertTail :: Int64 -> Int64 -> Int -> Mp.Map NodeIdT Jd.Node -> [NodeIdT]
-        -> Tx.Transaction (Either String ())
-insertTail conversationUid lastNodeUid startIdx mapping newNodeIds = do
-  go lastNodeUid (fromIntegral startIdx) newNodeIds
-  where
-    go :: Int64 -> Int32 -> [NodeIdT] -> Tx.Transaction (Either String ())
-    go _ _ [] = pure (Right ())
-    go parentUid seqNbr (nid:rest) =
-      case Mp.lookup nid mapping of
-        Nothing -> pure (Left ("@[insertTail] node not found in mapping: " <> T.unpack (showNodeId nid)))
-        Just node -> do
-          -- Insert node
-          nUuid <- case toUuid (nodeId node) of
-            Left e -> pure (Left e)
-            Right u -> pure (Right u)
-          case nUuid of
-            Left e -> pure (Left e)
-            Right nodeUuid -> do
-              newNodeUid <- Tx.statement (conversationUid, nodeUuid, Just parentUid, seqNbr) Scv.insertNodeRetUid
-
-              -- Insert message tree (if any)
-              eiMsg <-
-                case node.messageNd of
-                  Nothing -> pure (Right ())
-                  Just msg -> insertMessageTree newNodeUid msg
-
-              case eiMsg of
-                Left e -> pure (Left e)
-                Right () -> go newNodeUid (seqNbr + 1) rest
-
-
--- ----------------------------
--- Message tree insertion
--- ----------------------------
-
-insertMessageTree :: Int64 -> Jd.Message -> Tx.Transaction (Either String ())
-insertMessageTree nodeUid msg = do
-  -- message times (schema: NOT NULL)
-  let
-    eiCreate = maybe (Left "message.create_time missing") (Right . epochToUtc) msg.createTimeMsg
-    eiUpdate = maybe (Left "message.update_time missing") (Right . epochToUtc) msg.updateTimeMsg
-
-  case (eiCreate, eiUpdate) of
-    (Left e, _) -> pure (Left ("@[insertMessageTree] " <> e))
-    (_, Left e) -> pure (Left ("@[insertMessageTree] " <> e))
-    (Right cAt, Right uAt) -> do
-
-      mUid <- Tx.statement (nodeUid, msg.idMsg, cAt, uAt, msg.statusMsg, msg.endTurnMsg
-          , msg.weightMsg, Ae.toJSON (HM.fromList $ Mp.toList msg.metadataMsg), msg.recipientMsg, msg.channelMsg, 0) Scv.insertMessageRetUid
-
-      -- author (single)
-      let
-        au = msg.authorMsg
-      Tx.statement (mUid, au.roleAu,au.nameAu, Ae.toJSON (HM.fromList $ Mp.toList au.metadataAu)) Scv.insertAuthor
-
-      -- contents: most exports carry a single 'contentMsg'. We still store as seq=0.
-      insertContent mUid 0 msg.contentMsg
-
-
-insertContent :: Int64 -> Int32 -> Jd.Content -> Tx.Transaction (Either String ())
-insertContent messageUid seqNbr content = do
-  let (ctype, payload) = contentTypeAndJson content
-
-  cUid <- Tx.statement (messageUid, ctype, seqNbr) Scv.insertContentRetUid
-
-  -- Insert subtype payload
-  case payload of
-    CodePayload lang fmt txt ->
-      Tx.statement (cUid, lang, fmt, txt) Scv.insertCodeContent >> pure (Right ())
-
-    ExecutionOutputPayload txt ->
-      Tx.statement (cUid, txt) Scv.insertExecutionOutputContent >> pure (Right ())
-
-    ModelEditableContextPayload msc repo rs sc ->
-      Tx.statement (cUid, msc, repo, rs, sc) Scv.insertModelEditableContextContent >> pure (Right ())
-
-    ReasoningRecapPayload txt ->
-      Tx.statement (cUid, txt) Scv.insertReasoningRecapContent >> pure (Right ())
-
-    SystemErrorPayload nm txt ->
-      Tx.statement (cUid, nm, txt) Scv.insertSystemErrorContent >> pure (Right ())
-
-    TetherBrowsingDisplayPayload results summ assets tid ->
-      Tx.statement (cUid, results, summ, assets, tid) Scv.insertTetherBrowsingDisplayContent >> pure (Right ())
-
-    TetherQuotePayload url domain txt title tid ->
-      Tx.statement (cUid, url, domain, txt, title, tid) Scv.insertTetherQuoteContent >> pure (Right ())
-
-    TextPayload parts ->
-      Tx.statement (cUid, parts) Scv.insertTextContent >> pure (Right ())
-
-    ThoughtsPayload sourceId thoughtsVec -> do
-      Tx.statement (cUid, sourceId) Scv.insertThoughtsContent
-      -- thoughts rows with seqnbr
-      forM_ (zip [0..] (V.toList thoughtsVec)) $ \(s, th) ->
-        Tx.statement (cUid, th.summaryTh, th.contentTh, Ae.toJSON th.chunksTh, fromMaybe False th.finishedTh, s) Scv.insertThought
-      pure (Right ())
-
-    UnknownPayload opaque ->
-      Tx.statement (cUid, opaque) Scv.insertUnknownContent >> pure (Right ())
-
-
--- ----------------------------
--- Content mapping (JSON -> DB payload)
--- ----------------------------
-
--- | Internal representation of payload variants to keep insertContent readable.
--- This deliberately mirrors your subtype tables.
-
-data ContentPayload
-  = CodePayload !Text !(Maybe Text) !Text
-  | ExecutionOutputPayload !Text
-  | ModelEditableContextPayload !Text !(Maybe Value) !(Maybe Value) !(Maybe Value)
-  | ReasoningRecapPayload !Text
-  | SystemErrorPayload !Text !Text
-  | TetherBrowsingDisplayPayload !Text !(Maybe Text) !(Maybe Value) !(Maybe Text)
-  | TetherQuotePayload !Text !Text !Text !Text !(Maybe Text)
-  | TextPayload !(V.Vector Text)
-  | ThoughtsPayload !Text !(V.Vector Jd.Thought)
-  | UnknownPayload !Value
-
-contentTypeAndJson :: Jd.Content -> (Text, ContentPayload)
-contentTypeAndJson = \case
-  Jd.CodeCT lang fmt txt ->
-    ("code", CodePayload lang fmt txt)
-  Jd.ExecutionOutputCT txt ->
-    ("execution_output", ExecutionOutputPayload txt)
-  Jd.ModelEditableContextCT msc repo rs sc ->
-    ("model_editable_context", ModelEditableContextPayload msc repo rs sc)
-  Jd.ReasoningRecapCT txt ->
-    ("reasoning_recap", ReasoningRecapPayload txt)
-  Jd.SystemErrorCT nm txt ->
-    ("system_error", SystemErrorPayload nm txt)
-  Jd.TetherBrowsingDisplayCT results mbSummary assets tid ->
-    let
-      assetsValue = Ae.toJSON <$> assets
-    in
-    ("tether_browsing_display", TetherBrowsingDisplayPayload results mbSummary assetsValue tid)
-  Jd.TetherQuoteCT url domain txt title tid ->
-    ("tether_quote", TetherQuotePayload url domain txt title tid)
-  Jd.TextCT parts ->
-    ("text", TextPayload (V.fromList parts))
-  Jd.ThoughtsCT thoughts sourceId ->
-    ("thoughts", ThoughtsPayload sourceId (V.fromList thoughts))
-  -- Multimodal is supported by tables, but JSON part typing varies; to preserve fidelity,
-  -- store it as unknown for now unless/until you map the parts 1:1.
-  Jd.MultimodalTextCT parts ->
-    ("multimodal_text", UnknownPayload (Ae.toJSON parts))
-  Jd.OtherCT contentType raw ->
-    ("unknown:" <> contentType, UnknownPayload (Ae.toJSON (HM.fromList $ Mp.toList raw)))
-  other -> ("unknown", UnknownPayload (Ae.toJSON other))
-
-
--- ----------------------------
--- Linearisation (chain)
--- ----------------------------
-
--- Your JSON mapping key may be UUID or Text in different stages.
--- We keep the key abstract and require two small accessors.
+appendAddStat :: AddStat -> AddStat -> AddStat
+appendAddStat left right =
+  AddStat
+    { nodeAddedCntAS = left.nodeAddedCntAS + right.nodeAddedCntAS
+    , msgAddedCntAS = left.msgAddedCntAS + right.msgAddedCntAS
+    }
 
 type NodeIdT = Text
 
-nodeId :: Jd.Node -> NodeIdT
-nodeId = Jd.idNd
+updateConversation :: Hp.Pool -> Jd.Conversation -> IO (Either Hp.UsageError (Either String ReportRaw))
+updateConversation pool conv =
+  Hp.use pool $
+    TxS.transaction TxS.ReadCommitted TxS.Write $
+      updateTx conv
 
-showNodeId :: NodeIdT -> Text
-showNodeId = id
+updateTx :: Jd.Conversation -> Tx.Transaction (Either String ReportRaw)
+updateTx conv = do
+  mbConv <- Tx.statement conv.convIdCv Dcv.selectConversationForUpdate
+  case mbConv of
+    Nothing ->
+      pure $
+        Left $
+          "@[OpenAI.Serialize.IncrUpdate.updateConversation] conversation not found: "
+            <> T.unpack conv.convIdCv
 
--- | Convert the node mapping into a deterministic chain order.
---
--- Strategy:
---   * Find a root: node with parent == Nothing (fallback).
---   * Walk by children, choosing the smallest child ID if multiple (stable).
---   * Stop on cycles or missing references.
-linearizeNodeChain :: Mp.Map NodeIdT Jd.Node -> Either Text [NodeIdT]
-linearizeNodeChain mapping = do
-  root <-
-    case findRoot mapping of
-      Nothing -> Left "@[linearizeNodeChain] no root node found"
-      Just r -> Right r
+    Just (uidConv, titleDb, timeUpdateDb) -> do
+      case Oor.buildNodeOrd conv.mappingCv of
+        Left issues ->
+          pure $
+            Left $
+              "@[OpenAI.Serialize.IncrUpdate.updateConversation] invalid node order: "
+                <> renderOrdIssues issues
 
-  let childMap =
-        Mp.fromListWith (++)
-          [ (p, [c])
-          | (c, n) <- Mp.toList mapping
-          , Just p <- [n.parentNd]
-          ]
+        Right nodeOrds -> do
+          maxSeq <- Tx.statement uidConv Dcv.selectMaxNodeSeq
+          if maxSeq < 0
+            then do
+              Tx.condemn
+              pure $
+                Left $
+                  "@[OpenAI.Serialize.IncrUpdate.updateConversation] existing conversation has no stored nodes: "
+                    <> show uidConv
+            else do
+              let orderedNodeIds = orderedNodeEids nodeOrds
+              let startIdx = fromIntegral maxSeq + 1
+              let nodeCountJs = length orderedNodeIds
+              if startIdx > nodeCountJs
+                then do
+                  Tx.condemn
+                  pure $
+                    Left $
+                      "@[OpenAI.Serialize.IncrUpdate.updateConversation] DB node sequence exceeds JSON node order; append-only updater cannot reconcile"
+                else do
+                  let newTail = drop startIdx orderedNodeIds
+                  let titleChanged = conv.titleCv /= titleDb
+                  let updateChanged = conv.updateTimeCv /= timeUpdateDb
+                  let sameRaw = not titleChanged && not updateChanged && null newTail
 
-      go seen cur =
-        if Mp.member cur seen
-          then Left ("@[linearizeNodeChain] cycle detected at " <> showNodeId cur)
-          else
-            let seen' = Mp.insert cur () seen
-                nexts = sort (Mp.findWithDefault [] cur childMap)
-            in case nexts of
-                [] -> Right [cur]
-                (nxt:_) -> (cur :) <$> go seen' nxt
+                  if sameRaw
+                    then
+                      pure $
+                        Right $
+                          ReportRaw
+                            { uidConv = uidConv
+                            , nodeAddedCnt = 0
+                            , msgAddedCnt = 0
+                            , titleChanged = False
+                            , sameRaw = True
+                            , notesRaw = ["no raw changes detected"]
+                            }
+                    else do
+                      when (titleChanged || updateChanged) $ do
+                        Tx.statement (uidConv, timeUpdateDb, titleDb) Scv.insertConversationPrevious
+                        Tx.statement (conv.titleCv, conv.updateTimeCv, uidConv) Scv.updateConversation
 
-  go Mp.empty (nodeId root)
+                      addStatE <-
+                        if null newTail
+                          then pure (Right emptyAddStat)
+                          else do
+                            let ordByEid = Mp.fromList [(nodeOrd.eidNode, nodeOrd) | nodeOrd <- nodeOrds]
+                            insertTail uidConv (fromIntegral startIdx) conv.mappingCv ordByEid newTail
 
-findRoot :: Mp.Map NodeIdT Jd.Node -> Maybe Jd.Node
-findRoot mp =
-  case filter (\n -> isNothing n.parentNd) (Mp.elems mp) of
-    [] -> Nothing
-    (x:_) -> Just x
+                      case addStatE of
+                        Left err -> do
+                          Tx.condemn
+                          pure (Left err)
 
+                        Right addStat -> do
+                          let hashConv = sha256 (Ae.encode conv)
+                          Tx.statement
+                            (uidConv, Just "phase2-incrupdate" :: Maybe Text, Just hashConv, "incremental-append" :: Text)
+                            Scv.insertConversationIngest
 
--- ----------------------------
--- Small typeclass helpers
--- ----------------------------
+                          pure $
+                            Right $
+                              ReportRaw
+                                { uidConv = uidConv
+                                , nodeAddedCnt = addStat.nodeAddedCntAS
+                                , msgAddedCnt = addStat.msgAddedCntAS
+                                , titleChanged = titleChanged
+                                , sameRaw = False
+                                , notesRaw = buildNotes titleChanged updateChanged addStat
+                                }
 
-class ToUuid a where
-  toUuid :: a -> Either String UUID
+insertTail
+  :: Int64
+  -> Int32
+  -> Mp.Map NodeIdT Jd.Node
+  -> Mp.Map NodeIdT Oor.NodeOrd
+  -> [NodeIdT]
+  -> Tx.Transaction (Either String AddStat)
+insertTail conversationUid startSeq mapping ordByEid newNodeIds =
+  go Mp.empty startSeq newNodeIds
+  where
+    go :: Mp.Map NodeIdT Int64 -> Int32 -> [NodeIdT] -> Tx.Transaction (Either String AddStat)
+    go _ _ [] = pure (Right emptyAddStat)
+    go uidByEid seqNbr (eidNode : rest) =
+      case Mp.lookup eidNode mapping of
+        Nothing ->
+          pure $
+            Left $
+              "@[OpenAI.Serialize.IncrUpdate.insertTail] node not found in mapping: "
+                <> T.unpack eidNode
 
-instance ToUuid UUID where
-  toUuid = Right
+        Just node ->
+          case Mp.lookup eidNode ordByEid of
+            Nothing ->
+              pure $
+                Left $
+                  "@[OpenAI.Serialize.IncrUpdate.insertTail] node order missing for node: "
+                    <> T.unpack eidNode
 
-instance ToUuid Text where
-  toUuid t = maybe (Left ("invalid uuid: " <> T.unpack t)) Right (UUID.fromText t)
+            Just nodeOrd -> do
+              parentFkE <- resolveParentUid conversationUid uidByEid nodeOrd.eidParent
+              case parentFkE of
+                Left err ->
+                  pure (Left err)
 
+                Right parentFk -> do
+                  uidNode <-
+                    Tx.statement
+                      (conversationUid, node.idNd, parentFk, seqNbr, nodeOrd.seqChild, nodeOrd.seqPre)
+                      Scv.insertNode
 
-class ToUtc a where
-  toUtc :: a -> Either String UTCTime
+                  msgCntE <-
+                    case node.messageNd of
+                      Nothing -> pure (Right 0)
+                      Just msg -> insertMessageTree uidNode msg
 
-instance ToUtc UTCTime where
-  toUtc = Right
+                  case msgCntE of
+                    Left err ->
+                      pure (Left err)
 
-instance ToUtc Double where
-  toUtc = Right . epochToUtc
+                    Right msgCnt -> do
+                      restE <- go (Mp.insert eidNode uidNode uidByEid) (seqNbr + 1) rest
+                      pure $
+                        fmap
+                          (\restStat -> appendAddStat (AddStat 1 msgCnt) restStat)
+                          restE
 
-instance ToUtc Text where
-  toUtc t =
-    case parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" (T.unpack t) of
-      Just u -> Right u
-      Nothing -> Left ("invalid UTC time: " <> T.unpack t)
+resolveParentUid
+  :: Int64
+  -> Mp.Map NodeIdT Int64
+  -> Maybe NodeIdT
+  -> Tx.Transaction (Either String (Maybe Int64))
+resolveParentUid _ _ Nothing =
+  pure (Right Nothing)
+resolveParentUid conversationUid uidByEid (Just eidParent) =
+  case Mp.lookup eidParent uidByEid of
+    Just uidParent ->
+      pure (Right (Just uidParent))
 
-epochToUtc :: Double -> UTCTime
-epochToUtc = posixSecondsToUTCTime . realToFrac
+    Nothing -> do
+      mbParent <- Tx.statement (conversationUid, eidParent) Dcv.selectNodeByEid
+      case mbParent of
+        Nothing ->
+          pure $
+            Left $
+              "@[OpenAI.Serialize.IncrUpdate.resolveParentUid] parent node not found in DB: "
+                <> T.unpack eidParent
 
+        Just (uidParent, _, _, _) ->
+          pure (Right (Just uidParent))
+
+insertMessageTree :: Int64 -> Jd.Message -> Tx.Transaction (Either String Int)
+insertMessageTree uidNode msg = do
+  uidMsg <-
+    Tx.statement
+      ( uidNode
+      , msg.idMsg
+      , msg.createTimeMsg
+      , msg.updateTimeMsg
+      , msg.statusMsg
+      , msg.endTurnMsg
+      , msg.weightMsg
+      , mapJson msg.metadataMsg
+      , msg.recipientMsg
+      , msg.channelMsg
+      , 0 :: Int32
+      )
+      Scv.insertMessageRetUid
+
+  let author = msg.authorMsg
+  Tx.statement
+    (uidMsg, author.roleAu, author.nameAu, mapJson author.metadataAu)
+    Scv.insertAuthor
+
+  contentE <- insertContent uidMsg 0 msg.contentMsg
+  pure (fmap (const 1) contentE)
+
+insertContent :: Int64 -> Int32 -> Jd.Content -> Tx.Transaction (Either String ())
+insertContent uidMsg seqContent content = do
+  let (kindC, payload) = contentTypeAndPayload content
+  uidContent <- Tx.statement (uidMsg, kindC, seqContent) Scv.insertContentRetUid
+
+  case payload of
+    CodePL langCode formatRef textCode -> do
+      Tx.statement (uidContent, langCode, formatRef, textCode) Scv.insertCodeContent
+      pure (Right ())
+
+    ExecOutPL textOut -> do
+      Tx.statement (uidContent, textOut) Scv.insertExecutionOutputContent
+      pure (Right ())
+
+    ModelCtxPL modelSlug repoJson rsJson scJson -> do
+      Tx.statement (uidContent, modelSlug, repoJson, rsJson, scJson) Scv.insertModelEditableContextContent
+      pure (Right ())
+
+    ReasoningPL textReasoning -> do
+      Tx.statement (uidContent, textReasoning) Scv.insertReasoningRecapContent
+      pure (Right ())
+
+    SystemErrPL nameErr textErr -> do
+      Tx.statement (uidContent, nameErr, textErr) Scv.insertSystemErrorContent
+      pure (Right ())
+
+    TetherBrowsePL resultsJson summaryJson assetsJson tetherId -> do
+      Tx.statement (uidContent, resultsJson, summaryJson, assetsJson, tetherId) Scv.insertTetherBrowsingDisplayContent
+      pure (Right ())
+
+    TetherQuotePL urlQuote domainQuote textQuote titleQuote tetherId -> do
+      Tx.statement (uidContent, urlQuote, domainQuote, textQuote, titleQuote, tetherId) Scv.insertTetherQuoteContent
+      pure (Right ())
+
+    TextPL partsText -> do
+      Tx.statement (uidContent, partsText) Scv.insertTextContent
+      pure (Right ())
+
+    ThoughtsPL sourceId thoughts -> do
+      Tx.statement (uidContent, sourceId) Scv.insertThoughtsContent
+      forM_ (zip [0 :: Int32 ..] (V.toList thoughts)) $ \(seqThought, thought) ->
+        Tx.statement
+          ( uidContent
+          , thought.summaryTh
+          , thought.contentTh
+          , Ae.toJSON thought.chunksTh
+          , fromMaybe False thought.finishedTh
+          , seqThought
+          )
+          Scv.insertThought
+      pure (Right ())
+
+    UnknownPL rawJson -> do
+      Tx.statement (uidContent, rawJson) Scv.insertUnknownContent
+      pure (Right ())
+
+data Payload
+  = CodePL !Text !(Maybe Text) !Text
+  | ExecOutPL !Text
+  | ModelCtxPL !Text !(Maybe Value) !(Maybe Value) !(Maybe Value)
+  | ReasoningPL !Text
+  | SystemErrPL !Text !Text
+  | TetherBrowsePL !Text !(Maybe Value) !(Maybe Value) !(Maybe Text)
+  | TetherQuotePL !Text !Text !Text !Text !(Maybe Text)
+  | TextPL !(V.Vector Text)
+  | ThoughtsPL !Text !(V.Vector Jd.Thought)
+  | UnknownPL !Value
+
+contentTypeAndPayload :: Jd.Content -> (Text, Payload)
+contentTypeAndPayload = \case
+  Jd.CodeCT langCode formatRef textCode ->
+    ("code", CodePL langCode formatRef textCode)
+
+  Jd.ExecutionOutputCT textOut ->
+    ("execution_output", ExecOutPL textOut)
+
+  Jd.ModelEditableContextCT modelSlug repoJson rsJson scJson ->
+    ("model_editable_context", ModelCtxPL modelSlug repoJson rsJson scJson)
+
+  Jd.ReasoningRecapCT textReasoning ->
+    ("reasoning_recap", ReasoningPL textReasoning)
+
+  Jd.SystemErrorCT nameErr textErr ->
+    ("system_error", SystemErrPL nameErr textErr)
+
+  Jd.TetherBrowsingDisplayCT resultsJson summaryJson assetsJson tetherId ->
+    ( "tether_browsing_display"
+    , TetherBrowsePL resultsJson (Ae.toJSON <$> summaryJson) (Ae.toJSON <$> assetsJson) tetherId
+    )
+
+  Jd.TetherQuoteCT urlQuote domainQuote textQuote titleQuote tetherId ->
+    ("tether_quote", TetherQuotePL urlQuote domainQuote textQuote titleQuote tetherId)
+
+  Jd.TextCT partsText ->
+    ("text", TextPL (V.fromList partsText))
+
+  Jd.ThoughtsCT thoughts sourceId ->
+    ("thoughts", ThoughtsPL sourceId (V.fromList thoughts))
+
+  Jd.MultimodalTextCT parts ->
+    ("multimodal_text", UnknownPL (Ae.toJSON parts))
+
+  Jd.OtherCT kindOther rawOther ->
+    (kindOther, UnknownPL (mapJson rawOther))
+
+  other ->
+    ("unknown", UnknownPL (Ae.toJSON other))
+
+orderedNodeEids :: [Oor.NodeOrd] -> [NodeIdT]
+orderedNodeEids nodeOrds =
+  map (.eidNode) $
+    sortOn
+      (\nodeOrd -> (nodeOrd.seqPre, nodeOrd.seqNode, nodeOrd.seqChild, nodeOrd.eidNode))
+      nodeOrds
+
+buildNotes :: Bool -> Bool -> AddStat -> [Text]
+buildNotes titleChanged updateChanged addStat =
+  catMaybes
+    [ if titleChanged then Just "title updated" else Nothing
+    , if updateChanged then Just "update_time updated" else Nothing
+    , if addStat.nodeAddedCntAS > 0
+        then Just ("tail nodes inserted: " <> tshow addStat.nodeAddedCntAS)
+        else Nothing
+    , if addStat.msgAddedCntAS > 0
+        then Just ("message trees inserted: " <> tshow addStat.msgAddedCntAS)
+        else Nothing
+    , if addStat.nodeAddedCntAS > 0
+        then Just "append-only raw updater applied tail insertion"
+        else Nothing
+    ]
+
+renderOrdIssues :: [Oor.OrdIssue] -> String
+renderOrdIssues issues =
+  T.unpack $
+    T.intercalate "; " $
+      map (T.pack . show) issues
+
+mapJson :: Mp.Map Text Value -> Value
+mapJson mp =
+  Ae.toJSON (HM.fromList (Mp.toList mp))
+
+tshow :: Show a => a -> Text
+tshow =
+  T.pack . show
 
 sha256 :: BL.ByteString -> ByteString
-sha256 bs =
-  let d :: CH.Digest CH.SHA256
-      d = CH.hashlazy bs
-  in BA.convert d
+sha256 bytesLazy =
+  BA.convert (CH.hashlazy bytesLazy :: CH.Digest CH.SHA256)

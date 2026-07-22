@@ -25,7 +25,6 @@ import Hasql.Statement (Statement)
 import qualified Hasql.Pool as Hp
 import qualified Hasql.TH as TH
 import qualified Hasql.Session as Ses
-
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
@@ -173,9 +172,18 @@ allDiscussionsInGroup pool groupLabel = do
 --   * Right (Just x) => loaded successfully
 --   * Left err       => DB error or unexpected schema inconsistency
 loadDiscussion :: Hp.Pool -> UUID -> IO (Either Hp.UsageError (Either String (Maybe DiscussionDb)))
-loadDiscussion pool discourseUuid = do
-  Hp.use pool $
-    TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx discourseUuid)
+loadDiscussion pool discourseUuid = Hp.use pool $
+  TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx discourseUuid)
+
+
+loadDiscussionByUid :: Hp.Pool -> Int64 -> IO (Either Hp.UsageError (Either String (Maybe DiscussionDb)))
+loadDiscussionByUid pool uid = do
+  eiRez <- Hp.use pool $ Ses.statement uid St.selectDiscussionByUid
+  case eiRez of
+    Left err -> pure $ Left err
+    Right Nothing -> pure . Right . Left $ "discussion not found for uid: " <> show uid
+    Right (Just (_, discUuid, _, _)) ->
+      Hp.use pool $ TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx discUuid)
 
 
 findDiscussionByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))

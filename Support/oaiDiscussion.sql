@@ -72,11 +72,19 @@ CREATE TABLE IF NOT EXISTS messagefsm (
   -- Timing (converted from epoch seconds at ingestion)
   created_at TIMESTAMPTZ NULL,
   updated_at TIMESTAMPTZ NULL,
+  -- Remember the source of the message, for incremental ingestion.
+  source_first_node_eid text,
+  source_last_node_eid text,
+  source_message_eids text[],
+  source_hash bytea,
+
   CONSTRAINT message_uuid_uniq UNIQUE (uuid),
   CONSTRAINT message_discussion_fk_fk
     FOREIGN KEY (discussion_fk) REFERENCES discussion(uid) ON DELETE CASCADE,
   CONSTRAINT message_discussion_seq_uniq UNIQUE (discussion_fk, seq)
 );
+
+create unique index messagefsm_source_hash_unique on messagefsm(discussion_fk, source_hash);
 
 -- Attachments: UserMessage.attachmentsUM, AssistantMessage.attachmentsAM, etc.
 CREATE TABLE IF NOT EXISTS message_attachment (
@@ -98,7 +106,13 @@ CREATE TABLE IF NOT EXISTS message_attachment (
 create table if not exists message_summary (
   message_fk BIGINT PRIMARY KEY REFERENCES messagefsm(uid),
   content TEXT NOT NULL
+  -- Add support to manage incremental ingestion.
+  source_hash bytea,
+  model text,
+  generated_at timestamptz not null default now()
 );
+
+
 
 -- -----------------------------
 -- Per-kind payload tables
@@ -202,6 +216,11 @@ CREATE TABLE IF NOT EXISTS sub_action (
   text       TEXT NULL,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Remember the source of the sub-action, for incremental ingestion.
+  source_message_eid text,
+  source_content_seq int4,
+  source_hash bytea,
 
   CONSTRAINT sub_action_uuid_uniq UNIQUE (uuid),
   CONSTRAINT sub_action_message_fk_fk

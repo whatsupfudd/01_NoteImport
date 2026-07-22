@@ -9,10 +9,8 @@
 --   * calls Ollama /api/generate to produce a one-line title/summary per message
 --   * stores results in message_summary(message_fk, content)
 --
-module OpenAI.Summarisation
-  ( summarizeDiscourseMessages
-  , newOllamaManager
-  , summarizeMessageOneLine
+module OpenAI.Summarisation (
+    summarizeDiscourseMessages, newOllamaManager, summarizeMessageOneLine
   )
 where
 
@@ -35,22 +33,18 @@ import GHC.Generics (Generic)
 import Hasql.Statement (Statement)
 import qualified Hasql.Pool as Hp
 import qualified Hasql.TH as TH
-
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
-import Network.HTTP.Client
-  ( Manager, Request(..), RequestBody(..), Response(..)
+import Network.HTTP.Client (
+    Manager, Request(..), RequestBody(..), Response(..)
   , defaultManagerSettings, httpLbs, newManager, parseRequest
   , httpLbs, responseBody, responseTimeoutMicro
   )
 import Network.HTTP.Types.Header (hContentType)
 
-import OpenAI.Deserialize.Discussion
-  ( DiscussionDb(..)
-  , MessageDb(..)
-  , MessageKindDb(..)
-  , MessageBodyDb(..)
+import OpenAI.Deserialize.Discussion ( 
+    DiscussionDb(..), MessageDb(..), MessageKindDb(..), MessageBodyDb(..)
   , RefDb(..)
   )
 import qualified OpenAI.Utils as Utl
@@ -70,10 +64,9 @@ import qualified OpenAI.Utils as Utl
 --   * continues on errors and returns a combined error string at the end
 summarizeDiscourseMessages :: Hp.Pool -> Manager -> DiscussionDb -> IO (Either [Hp.UsageError] (Either [String] [()]))
 summarizeDiscourseMessages pool httpManager ctx = do
-  let candidates :: [(Int64, Text)]
-      candidates =
-        [ (uidRd (refMb m), txt)
-        | m <- V.toList (messagesCo ctx)
+  let
+    candidates :: [(Int64, Text)]
+    candidates = [ (uidRd (refMb m), txt) |  m <- V.toList ctx.messagesCo
         , kindMb m == UserMK || kindMb m == AssistantMK
         , let txt = messageMainText m
         , not (T.null (T.strip txt))

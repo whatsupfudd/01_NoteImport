@@ -1,221 +1,221 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use second" #-}
+
 module Commands.OpenAI where
 
 import qualified Control.Monad.Cont as Mc
 import Control.Monad (unless)
 
+import qualified Data.Aeson as Ae
 import qualified Data.ByteString.Lazy as BS
 import Data.Either (lefts, rights)
 import Data.Int (Int64)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
-import qualified Data.Set as Set
-import Data.Text (Text, unpack, intercalate)
+import Data.Maybe (mapMaybe)
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as Tio
 import Data.UUID (UUID)
-import qualified Data.UUID as Uu
 import qualified Data.Vector as V
 
 import System.FilePath ((</>))
 
-import qualified Data.Aeson as Ae
-
 import qualified Hasql.Pool as Hp
 import qualified Network.HTTP.Client as Ht
 
-import qualified Options.Runtime as Rto
-import qualified Options.Types as Opt
 import qualified DB.Connect as Dbc
-import qualified OpenAI.Json.Reader as Jd
 import qualified OpenAI.Conversation as Cv
-import qualified OpenAI.Parse as Op
-import qualified OpenAI.Serialize.Conversation as Scv
+import qualified OpenAI.ConvToDisc as Ccv
 import qualified OpenAI.Deserialize.Conversation as Dcv
-import qualified OpenAI.Serialize.Discussion as Sdc
 import qualified OpenAI.Deserialize.Discussion as Ddc
 import qualified OpenAI.Generate.Docx as Gd
 import qualified OpenAI.Generate.DocxDb as Gdb
-import qualified OpenAI.Summarisation as Sm
 import qualified OpenAI.Generate.Elmify as Em
+import qualified OpenAI.Import.Batch as Ib
+import qualified OpenAI.Import.Report as Ir
+import qualified OpenAI.Import.Types as Im
+import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Parse as Op
 import qualified OpenAI.ProjFetcher as Pf
-import qualified OpenAI.ConvToDisc as Ccv
+import qualified OpenAI.Serialize.Discussion as Sdc
+import qualified OpenAI.Summarisation as Sm
 import qualified OpenAI.Utils as Utl
+import qualified Options.Runtime as Rto
+import qualified Options.Types as Opt
 
 
 oaiCmd :: Opt.OaiSubCommand -> Rto.RunOptions -> IO ()
 oaiCmd opts rtOpts =
   case opts of
-    Opt.JsonSC oaiOpts -> case oaiOpts of
-      Opt.PrintJS jsonOpts targetsOpts -> printJson jsonOpts targetsOpts
-      Opt.StoreJS jsonOpts targetsOpts -> storeJsonAsConversations jsonOpts targetsOpts rtOpts
-    Opt.SummarySC oaiSummaryOpts -> saveSummaries oaiSummaryOpts rtOpts
+    Opt.JsonSC jsonCmd ->
+      case jsonCmd of
+        Opt.PrintJS printOpts targetsOpts -> printJson printOpts targetsOpts
+        Opt.StoreJS storeOpts targetsOpts -> storeJsonAsConversations storeOpts targetsOpts rtOpts
+    Opt.SummarySC summaryOpts -> saveSummaries summaryOpts rtOpts
     Opt.DocxSC genOpts -> saveDocx genOpts rtOpts
-    Opt.ElmSC genOpts -> saveElmFiles genOpts rtOpts
-    Opt.ProjFetchSC oaiProjFetchOpts -> saveProject oaiProjFetchOpts rtOpts
-    Opt.ConversationSC conversationOpts -> case conversationOpts of
-      Opt.DeserializeCS oaiGenOpts -> deserializeConversation oaiGenOpts rtOpts
-      Opt.ConvertCS oaiTargetsOpts -> convertConversation oaiTargetsOpts rtOpts
-      Opt.DocxCS oaiGenOpts -> saveConversationToDocx oaiGenOpts rtOpts
+    Opt.ProjFetchSC fetchOpts -> saveProject fetchOpts rtOpts
+    Opt.ConversationSC conversationCmd ->
+      case conversationCmd of
+        Opt.DeserializeCS genOpts -> deserializeConversation genOpts rtOpts
+        Opt.ConvertCS targetsOpts -> convertConversation targetsOpts rtOpts
+        Opt.DocxCS genOpts -> saveConversationToDocx genOpts rtOpts
 
 
-data ItemIdent =
-  EidCI Text
+data ItemIdent
+  = EidCI Text
   | UidCI Int64
   | UuidCI UUID
   deriving (Show)
 
 
-data GfTarget = GfTarget {
-  fileIdGF :: Text
+data GfTarget = GfTarget
+  { fileIdGF :: Text
   , titleGF :: Text
   , uidGF :: Text
-} deriving (Show)
+  } deriving (Show)
 
 
 gfTargets :: [GfTarget]
 gfTargets =
-  let
-    rawEntries =[
-        ("D1", "Sukuk and Takaful feasibility", "69089c63-47cc-832c-8e01-1a11b8da36aa")
-      , ("D2", "GoldFann banking strategy draft", "6905da75-e670-832f-89bc-05d843b67a26")
-      , ("D3", "Blockchain transaction strategy", "6906717d-8c9c-8327-8f08-9e9df05e3b0e")
-      , ("D4", "SoW for RfP (v2)", "68f32971-b760-8330-a9e8-6e9e3f3d53ce")
-      , ("D5", "Classification and Tax risk", "68e7474c-a644-8327-83f6-e733361a5c7c")
-      , ("D6", "GoldFann SoW strategy", "68ebc9e2-cf94-8332-9f90-0bfa44ae1346")
-      , ("D7", "SV ecosystem strategy", "68e0b4ea-cf00-8330-995a-7063bbfe5dce")
-      , ("D8", "UAE vs Switzerland comparison", "68d6cf94-3c04-832c-be43-f356c3ce7c06")
-      , ("D9", "SV structure, counsel, issues review", "68c931a8-5064-8329-a437-70b1954fbad5")
-      , ("D10", "AML KYC outsourcing responsibilities", "68d146a0-6bb4-8333-bfd6-c6a5202e9929")
-      , ("D11", "GoldFann RoI analysis", "68b9a4ba-7870-832f-b33f-aa40e86eceec")
-      , ("D12", "Luxembourg Token Fund Strategy", "68559736-c58c-8011-b3d1-9b75d90318de")
-      , ("D13", "UCITS vs SV comparison", "68a6b092-4df8-832c-b795-2ca7e5d99ae6")
-      , ("D14", " (v2) Lux structuring strategy", "68a59f2a-9458-8324-9697-ac460adfc1d3")
-      , ("D15", "Insurance Strategy for ArtCrypto", "6864d0e7-8574-8011-a5ee-a79ba92f1453")
-      , ("D16", "Gold Bullion Title Deeds Strategy", "6805cf5d-2d24-8011-a374-bb4bfaf8bb41")
-      , ("D17", "Cardano Blockchain for REIT", "681fa5b2-0aa0-8011-954b-dc381755168d")
-      ]
-  in
-  map (\(fileId, title, uid) -> GfTarget fileId title uid) rawEntries
+  let rawEntries = []
+  in map (\(fileId, title, uid) -> GfTarget fileId title uid) rawEntries
 
 
 parseJson :: FilePath -> Bool -> IO (Either String [Jd.Conversation])
 parseJson jsonFile exportB = do
   jsonContent <- BS.readFile jsonFile
   if exportB then
-    pure $ (Ae.eitherDecode jsonContent :: Either String [Jd.Conversation])
+    pure (Ae.eitherDecode jsonContent :: Either String [Jd.Conversation])
   else
     case Ae.eitherDecode jsonContent :: Either String Jd.Conversation of
       Left errMsg -> pure $ Left errMsg
       Right jsonConv -> do
-        putStrLn $ "@[parseJson] jsonConv: " <> unpack jsonConv.convIdCv
-        pure . Right . L.singleton $ jsonConv 
+        putStrLn $ "@[parseJson] jsonConv: " <> T.unpack jsonConv.convIdCv
+        pure . Right $ [jsonConv]
 
 
 printJson :: Opt.OaiPrintOpts -> Opt.TargetsOpts -> IO ()
 printJson printOpts targetsOpts = do
   rezA <- parseJson printOpts.jsonFilePR printOpts.exportPrB
   case rezA of
-    Left err -> putStrLn $ "Parsing failed: " ++ err
-    Right conversations ->
-      case targetsOpts.targetsTO of
-        [] -> mapM_ showConversation conversations
-        targets ->
-          let
-            orgMap = Mp.fromList $ map (\conversation -> (conversation.convIdCv, conversation)) conversations
-            targetConvrs = Mp.restrictKeys orgMap (Set.fromList targets)
-          in do
-          mapM_ showConversation targetConvrs
+    Left err -> putStrLn $ "Parsing failed: " <> err
+    Right conversations -> do
+      let (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
+      reportMissingTargets "printJson" missingTargets
+      if null targetConvs then
+        putStrLn "@[printJson] no conversations selected."
+      else
+        mapM_ showConversation targetConvs
 
 
 storeJsonAsConversations :: Opt.OaiStoreOpts -> Opt.TargetsOpts -> Rto.RunOptions -> IO ()
 storeJsonAsConversations storeOpts targetsOpts rtOpts = do
   rezA <- parseJson storeOpts.jsonFileST storeOpts.exportB
   case rezA of
-    Left err -> putStrLn $ "Parsing failed: " ++ err
-    Right conversations ->
-      let
-        pgPool = Dbc.startPg rtOpts.pgDbConf
-        targetConv = case targetsOpts.targetsTO of
-          [] -> conversations
-          targets ->
-            let
-              orgMap = Mp.fromList $ map (\conversation -> (conversation.convIdCv, conversation)) conversations
-              targetConvrs = Mp.restrictKeys orgMap (Set.fromList targets)
-            in
-            Mp.elems targetConvrs
-      in
-      if storeOpts.dryRunB then do
-        rezA <- Mc.runContT pgPool (saveConversations targetConv)
-        reportDbErrors "storeJsonAsConversations" rezA
-      else
-        putStrLn $ "@[storeJsonAsConversations] dry run, not saving."
+    Left err ->
+      putStrLn $ "Parsing failed: " <> err
+    Right conversations -> do
+      let (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
+      reportMissingTargets "storeJsonAsConversations" missingTargets
+      if null targetConvs then
+        putStrLn "@[storeJsonAsConversations] no conversations selected."
+      else do
+        let source = sourceFromStore storeOpts
+        let opts = optsFromStore storeOpts
+        let pgPool = Dbc.startPg rtOpts.pgDbConf
+        rezB <- Mc.runContT pgPool $ \pool ->
+          Ib.runBatch Nothing pool source opts targetConvs
+        case rezB of
+          Left errs ->
+            putStrLn $ "@[storeJsonAsConversations] db err: " <> show errs
+          Right batch ->
+            Tio.putStrLn $ Ir.renderBatch batch
+
+
+sourceFromStore :: Opt.OaiStoreOpts -> Im.Source
+sourceFromStore storeOpts =
+  Im.Source
+    { pathSrc = Just storeOpts.jsonFileST
+    , exportSrc = storeOpts.exportB
+    , labelSrc = Nothing
+    }
+
+
+optsFromStore :: Opt.OaiStoreOpts -> Im.Opts
+optsFromStore storeOpts =
+  Im.Opts
+    { modeOpt =
+        if storeOpts.dryRunB then Im.DryM else Im.WriteM
+    , scopeOpt = Im.RawOnlyS
+    , policyOpt =
+        Im.Policy
+          { allowOlderPol = False
+          , allowRepairPol = False
+          , stopOnFailPol = False
+          }
+    }
 
 
 reportDbErrors :: String -> Either [Hp.UsageError] (Either [String] [resultT]) -> IO ()
 reportDbErrors opLabel eiRez =
-  let
-    opPrefix = "@[" <> opLabel <> "] "
-  in
   case eiRez of
-    Left errs -> putStrLn $ opPrefix <> "db err: " <> show errs
-    Right (Left errs) -> putStrLn $ opPrefix <> "logic err: " <> show errs
-    Right (Right successInResults) -> putStrLn $ opPrefix <> "saved " <> show (length successInResults) <> "."
+    Left errs ->
+      putStrLn $ "@[" <> opLabel <> "] db err: " <> show errs
+    Right (Left errs) ->
+      putStrLn $ "@[" <> opLabel <> "] logic err: " <> show errs
+    Right (Right results) ->
+      putStrLn $ "@[" <> opLabel <> "] saved " <> show (length results) <> "."
 
 
 saveSummaries :: Opt.TargetsOpts -> Rto.RunOptions -> IO ()
-saveSummaries oaiSummaryOpts rtOpts =
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in do
-  rezA <- Mc.runContT pgPool (genSummaries oaiSummaryOpts)
+saveSummaries summaryOpts rtOpts = do
+  let pgPool = Dbc.startPg rtOpts.pgDbConf
+  rezA <- Mc.runContT pgPool (genSummaries summaryOpts)
   reportDbErrors "saveSummaries" rezA
 
 
-saveElmFiles :: Opt.OaiGenOpts -> Rto.RunOptions -> IO ()
-saveElmFiles genOpts rtOpts =
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in do
-  -- rezA <- Mc.runContT pgPool (generateElmFiles genOpts.destPath gfTargets)
-  --reportDbErrors "saveElmFiles" rezA
-  rezA <- Mc.runContT pgPool (doOnTargets genOpts generateElmFromItem)
-  reportDbErrors "saveElmFiles" rezA
+type OperFunction resultT =
+  Hp.Pool -> FilePath -> (Int, ItemIdent) -> IO (Either Hp.UsageError (Either String resultT))
 
-type OperFunction resultT = Hp.Pool -> FilePath -> (Int, ItemIdent) -> IO (Either Hp.UsageError (Either String resultT))
 
 doOnTargets :: Opt.OaiGenOpts -> OperFunction resultT -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [resultT]))
 doOnTargets genOpts operation pgPool =
   case genOpts.group of
     Nothing ->
       case genOpts.targets of
-        [] -> pure . Right $ Left ["@[doOnTargets] no targets to save."]
-        someTargets ->
-          let
-            targets = map EidCI someTargets
-          in do
-          putStrLn $ "@[doOnTargets] targets: " <> show someTargets <> ", saving " <> show (length targets) <> " targets."
-          rezA <- mapM (operation pgPool genOpts.destPath) (zip [1..] targets)
+        [] ->
+          pure . Right $ Left ["@[doOnTargets] no targets to save."]
+        someTargets -> do
+          let targets = map EidCI someTargets
+          putStrLn $
+            "@[doOnTargets] targets: "
+            <> show someTargets
+            <> ", saving "
+            <> show (length targets)
+            <> " targets."
+          rezA <- mapM (operation pgPool genOpts.destPath) (zip [1 ..] targets)
           pure $ Utl.listResultsToResultList rezA
-    Just aGroup -> do
-      eiDiscussions <- Ddc.allDiscussionsInGroup pgPool aGroup
+    Just groupName -> do
+      eiDiscussions <- Ddc.allDiscussionsInGroup pgPool groupName
       case eiDiscussions of
-        Left err -> pure . Left $ [err]
-        Right discussions ->
-          let
-            targetIDs = V.toList $ V.map (\(uid, title, uuid) -> UuidCI uuid) discussions
-          in do
-            putStrLn $ "@[doOnTargets] group: " <> unpack aGroup <> ", saving " <> show (length targetIDs) <> " targets."
-            rezA <- mapM (operation pgPool genOpts.destPath) (zip [1..] targetIDs)
-            pure $ Utl.listResultsToResultList rezA
+        Left err ->
+          pure . Left $ [err]
+        Right discussions -> do
+          let targetIds = V.toList $ V.map (\(_, _, uuid) -> UuidCI uuid) discussions
+          putStrLn $
+            "@[doOnTargets] group: "
+            <> T.unpack groupName
+            <> ", saving "
+            <> show (length targetIds)
+            <> " targets."
+          rezA <- mapM (operation pgPool genOpts.destPath) (zip [1 ..] targetIds)
+          pure $ Utl.listResultsToResultList rezA
 
 
 saveDocx :: Opt.OaiGenOpts -> Rto.RunOptions -> IO ()
-saveDocx genOpts rtOpts =
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in do
+saveDocx genOpts rtOpts = do
+  let pgPool = Dbc.startPg rtOpts.pgDbConf
   rezA <- Mc.runContT pgPool (saveDocxFromDiscs genOpts)
   reportDbErrors "saveDocx" rezA
 
@@ -223,103 +223,115 @@ saveDocx genOpts rtOpts =
 saveProject :: Opt.OaiProjFetchOpts -> Rto.RunOptions -> IO ()
 saveProject fetchOpts rtOpts = do
   projects <- Pf.saveProjects fetchOpts.sourcePath
-  putStrLn $ "Group: " <> unpack fetchOpts.label <> ", Projects (" <> show (length projects) <> ")"
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
+  putStrLn $
+    "Group: "
+    <> T.unpack fetchOpts.label
+    <> ", Projects ("
+    <> show (length projects)
+    <> ")"
+  let pgPool = Dbc.startPg rtOpts.pgDbConf
   rezA <- Mc.runContT pgPool (Pf.saveDescriptionsToGroup fetchOpts.label projects)
   reportDbErrors "saveProject" rezA
 
 
 deserializeConversation :: Opt.OaiGenOpts -> Rto.RunOptions -> IO ()
-deserializeConversation oaiGenOpts rtOpts =
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in
-  case oaiGenOpts.group of
-    Just group -> do
-      putStrLn $ "@[deserializeConversation] deserializing conversation: " <> oaiGenOpts.destPath <> " for group: " <> unpack group
+deserializeConversation genOpts rtOpts =
+  let pgPool = Dbc.startPg rtOpts.pgDbConf
+  in case genOpts.group of
+    Just groupName ->
+      putStrLn $
+        "@[deserializeConversation] deserializing conversation: "
+        <> genOpts.destPath
+        <> " for group: "
+        <> T.unpack groupName
     Nothing ->
-      case oaiGenOpts.targets of
-        [] -> putStrLn "@[deserializeConversation] no targets to deserialize."
+      case genOpts.targets of
+        [] ->
+          putStrLn "@[deserializeConversation] no targets to deserialize."
         targets -> do
-          rezA <- Mc.runContT pgPool (convDeserialize targets oaiGenOpts.destPath)
+          rezA <- Mc.runContT pgPool (convDeserialize targets genOpts.destPath)
           reportDbErrors "deserializeConversation" rezA
 
 
 convDeserialize :: [Text] -> FilePath -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Cv.ConversationDb]))
 convDeserialize targets destPath pgPool = do
-    results <- mapM (\target -> do
-        eiErrRez <- Dcv.getConversationByEid pgPool target
-        case eiErrRez of
-          Left err -> pure $ Left err
-          Right eiMbConv ->
-            case eiMbConv of
-              Left errMsg -> pure . Right $ Left errMsg
-              Right mbConv -> case mbConv of
-                Nothing -> pure . Right $ Left "no conversation found"
+  results <- mapM onTarget targets
+  case lefts results of
+    [] ->
+      case lefts (rights results) of
+        [] -> pure . Right . Right $ rights (rights results)
+        errMsgs -> pure . Right $ Left errMsgs
+    errs -> pure $ Left errs
+  where
+    onTarget :: Text -> IO (Either Hp.UsageError (Either String Cv.ConversationDb))
+    onTarget target = do
+      eiErrRez <- Dcv.getConversationByEid pgPool target
+      case eiErrRez of
+        Left err ->
+          pure $ Left err
+        Right eiMbConv ->
+          case eiMbConv of
+            Left errMsg ->
+              pure . Right $ Left errMsg
+            Right mbConv ->
+              case mbConv of
+                Nothing ->
+                  pure . Right $ Left "no conversation found"
                 Just convDb -> do
-                  putStrLn $ "@[convertConversation] deserializing conversation: " <> destPath <> " for target: " <> unpack target
-                  -- print convDb
+                  putStrLn $
+                    "@[convertConversation] deserializing conversation: "
+                    <> destPath
+                    <> " for target: "
+                    <> T.unpack target
                   case Ccv.analyzeConversation convDb of
-                    Left errMsgA -> pure . Right . Left $ unpack errMsgA
+                    Left errMsgA ->
+                      pure . Right . Left $ T.unpack errMsgA
                     Right context -> do
-                      rezA <- Gd.writeContextDocx context convDb.titleCv (destPath </> unpack convDb.eidCv <> ".docx")
+                      rezA <- Gd.writeContextDocx context convDb.titleCv (destPath </> T.unpack convDb.eidCv <> ".docx")
                       case rezA of
                         Left errMsgB -> do
                           putStrLn $ "@[convertConversation] error: " <> errMsgB
-                          pure . Right . Left $ errMsgB
-                        Right _ -> pure . Right $ Right convDb
-                      -- putStrLn $ "@[deserializeConversation] analyzed conversation: " <> destPath <> " for target: " <> unpack target
-                      -- print context
-                      pure . Right $ Right convDb
-      ) targets
-    case lefts results of
-      [] -> case lefts $ rights results of
-        [] -> pure . Right . Right . rights . rights $ results
-        errMsgs -> pure . Right . Left $ errMsgs
-      errs -> pure $ Left errs
+                          pure . Right $ Left errMsgB
+                        Right _ ->
+                          pure . Right $ Right convDb
 
 
 convertConversation :: Opt.TargetsOpts -> Rto.RunOptions -> IO ()
 convertConversation targetOpts rtOpts =
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in
-  case targetOpts.groupTO of
-    Just group -> do
-      putStrLn $ "@[convertConversation] group not supported yet: " <> unpack group
+  let pgPool = Dbc.startPg rtOpts.pgDbConf
+  in case targetOpts.groupTO of
+    Just groupName ->
+      putStrLn $ "@[convertConversation] group not supported yet: " <> T.unpack groupName
     Nothing ->
       case targetOpts.targetsTO of
         [] -> do
           rezA <- Mc.runContT pgPool convStoreAllConversations
           reportDbErrors "convStoreAllConversations" rezA
-        targets ->
-          let
-            targetIDs = map EidCI targets
-          in do
-          rezA <- Mc.runContT pgPool (convStoreDiscussions targetIDs)
+        targets -> do
+          let targetIds = map EidCI targets
+          rezA <- Mc.runContT pgPool (convStoreDiscussions targetIds)
           reportDbErrors "convStoreDiscussion" rezA
 
 
 convStoreAllConversations :: Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
 convStoreAllConversations pgPool = do
-  conversations <- Dcv.fetchAllConversations pgPool
-  case conversations of
-    Left err -> pure . Left $ [err]
+  eiConversations <- Dcv.fetchAllConversations pgPool
+  case eiConversations of
+    Left err ->
+      pure . Left $ [err]
     Right conversations ->
-      let
-        targetIDs = map UidCI (Mp.elems conversations)
-      in do
-      convStoreDiscussions targetIDs pgPool
+      let targetIds = map UidCI (Mp.elems conversations)
+      in convStoreDiscussions targetIds pgPool
 
 
 convStoreDiscussions :: [ItemIdent] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
 convStoreDiscussions targets pgPool = do
   results <- mapM (convStoreADiscussion pgPool) targets
   case lefts results of
-    [] -> case lefts $ rights results of
-      [] -> pure . Right . Right . rights . rights $ results
-      errMsgs -> pure . Right . Left $ errMsgs
+    [] ->
+      case lefts (rights results) of
+        [] -> pure . Right . Right $ rights (rights results)
+        errMsgs -> pure . Right $ Left errMsgs
     errs -> pure $ Left errs
 
 
@@ -328,194 +340,197 @@ convStoreADiscussion pgPool target = do
   eiErrRez <- case target of
     EidCI eid -> Dcv.getConversationByEid pgPool eid
     UidCI uid -> Dcv.getConversationByUid pgPool uid
+    UuidCI uuid -> pure . Right . Left $ "UUID target not supported for conversation lookup: " <> show uuid
   case eiErrRez of
-    Left err -> pure $ Left err
+    Left err ->
+      pure $ Left err
     Right eiMbConv ->
       case eiMbConv of
-        Left errMsg -> pure . Right $ Left errMsg
-        Right mbConv -> case mbConv of
-          Nothing -> pure . Right $ Left "no conversation found"
-          Just convDb -> do
-            putStrLn $ "@[convStoreDiscussion] deserializing for target: " <> show target
-            -- print convDb
-            case Ccv.analyzeConversation convDb of
-              Left errMsgA -> pure . Right . Left $ unpack errMsgA
-              Right context -> do
-                rezA <- Sdc.storeDiscussion pgPool convDb.titleCv convDb.eidCv context
-                case rezA of
-                  Left errMsgB -> do
-                    putStrLn $ "@[convertConversation] error: " <> errMsgB
-                    pure . Right . Left $ errMsgB
-                  Right (ctxUid, ctxUuid) -> pure . Right $ Right ctxUid
-                -- print context
+        Left errMsg ->
+          pure . Right $ Left errMsg
+        Right mbConv ->
+          case mbConv of
+            Nothing ->
+              pure . Right $ Left "no conversation found"
+            Just convDb -> do
+              putStrLn $ "@[convStoreDiscussion] deserializing for target: " <> show target
+              case Ccv.analyzeConversation convDb of
+                Left errMsgA ->
+                  pure . Right . Left $ T.unpack errMsgA
+                Right context -> do
+                  rezA <- Sdc.storeDiscussion pgPool convDb.titleCv convDb.eidCv context
+                  case rezA of
+                    Left errMsgB -> do
+                      putStrLn $ "@[convertConversation] error: " <> errMsgB
+                      pure . Right $ Left errMsgB
+                    Right (ctxUid, _) ->
+                      pure . Right $ Right ctxUid
 
 
 saveConversations :: [Jd.Conversation] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
-saveConversations discussions pgPool = do
-  discussionMap <- Dcv.fetchAllConversations pgPool
-  case discussionMap of
-    Left err -> pure . Left $ [err]
-    Right discussionMap ->
-      let
-        newDiscussions = filter (\discussion -> not (Mp.member discussion.titleCv discussionMap)) discussions
-      in
-      case newDiscussions of
-        [] -> do
-          putStrLn $ "@[saveConversations] no new discussions to save."
-          pure . Right . Right $ []
-        _ -> do
-          putStrLn $ "@[saveConversations] saving " <> show (length newDiscussions) <> " new "
-              <> (if length newDiscussions > 1 then "conversations" else "conversation")
-              <> "."
-          results <- mapM (Scv.addConversation pgPool) newDiscussions
-          pure $ Utl.listResultsToResultList results
+saveConversations conversations pgPool = do
+  putStrLn "@[saveConversations] deprecated; use OpenAI.Import.Batch.runBatch."
+  let source =
+        Im.Source
+          { pathSrc = Nothing
+          , exportSrc = False
+          , labelSrc = Just "saveConversations"
+          }
+  let opts =
+        Im.Opts
+          { modeOpt = Im.WriteM
+          , scopeOpt = Im.RawOnlyS
+          , policyOpt =
+              Im.Policy
+                { allowOlderPol = False
+                , allowRepairPol = False
+                , stopOnFailPol = False
+                }
+          }
+  rezA <- Ib.runBatch Nothing pgPool source opts conversations
+  pure $
+    case rezA of
+      Left errs ->
+        Left errs
+      Right batch ->
+        let failMsgs = map (\eid -> "@[saveConversations] failed: " <> T.unpack eid) batch.failedEids
+            convUids = mapMaybe (\report -> report.uidConv) batch.reports
+        in if null failMsgs then
+             Right $ Right convUids
+           else
+             Right $ Left failMsgs
 
 
 showConversation :: Jd.Conversation -> IO ()
 showConversation conversation = do
-  putStrLn . unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
-  let
-    (analysis, issues) = Op.showDiscussion conversation
-  putStrLn . unpack $ analysis
+  putStrLn . T.unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
+  let (analysis, issues) = Op.showDiscussion conversation
+  putStrLn . T.unpack $ analysis
   unless (null issues) $
-    putStrLn $ "@[showConversation] issues: " <> L.intercalate "\n" (map unpack issues)
+    putStrLn $ "@[showConversation] issues: " <> L.intercalate "\n" (map T.unpack issues)
 
 
 mapDiscussionsToElm :: [Jd.Conversation] -> IO ()
-mapDiscussionsToElm discussions = do
-  mapM_ (\discussion -> do
-    putStrLn . unpack $ "Title: " <> discussion.titleCv <> ", id: " <> discussion.convIdCv
-    let
-      rezElm = Op.discussionToElm discussion
-    case rezElm of
-      Left err -> putStrLn $ "@[mapDiscussionsToElm] error: " <> unpack err
-      Right elm -> putStrLn . unpack $ elm
-    ) discussions
+mapDiscussionsToElm conversations =
+  mapM_
+    (\conversation -> do
+      putStrLn . T.unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
+      case Op.discussionToElm conversation of
+        Left err ->
+          putStrLn $ "@[mapDiscussionsToElm] error: " <> T.unpack err
+        Right elm ->
+          putStrLn . T.unpack $ elm
+    )
+    conversations
 
 
 runOnDiscussionSubset :: [Jd.Conversation] -> [GfTarget] -> (Mp.Map Text GfTarget -> Jd.Conversation -> IO ()) -> IO ()
-runOnDiscussionSubset discussions targets evalFct =
-  let
-    targetMap = Mp.fromList $ map (\target -> (target.uidGF, target)) targets
-    targetDiscussions = filter (\discussion -> Mp.member discussion.convIdCv targetMap) discussions
-  in
-  mapM_ (evalFct targetMap) targetDiscussions
+runOnDiscussionSubset conversations targets evalFct =
+  let targetMap = Mp.fromList $ map (\target -> (target.uidGF, target)) targets
+      targetConvs = filter (\conversation -> Mp.member conversation.convIdCv targetMap) conversations
+  in mapM_ (evalFct targetMap) targetConvs
 
 
 extractGFContent :: [Jd.Conversation] -> IO ()
-extractGFContent discussions =
-  runOnDiscussionSubset discussions gfTargets makeElmFile
+extractGFContent conversations =
+  runOnDiscussionSubset conversations gfTargets makeElmFile
   where
-  makeElmFile :: Mp.Map Text GfTarget -> Jd.Conversation -> IO ()
-  makeElmFile targetMap discussion = do
-    putStrLn . unpack $ "Title: " <> discussion.titleCv <> ", id: " <> discussion.convIdCv
-    let
-      rezElm = Op.discussionToElm discussion
-    case rezElm of
-      Left err -> putStrLn $ "@[extractGFContent] error: " <> unpack err
-      Right elm ->
-        case Mp.lookup discussion.convIdCv targetMap of
-          Just target ->
-            let
-              outPath = "/tmp/" <> unpack target.fileIdGF <> ".elm"
-              elmContent = elmPreambule target <> "\n\nmessages = " <> elm <> "\n"
-            in do
-            Tio.writeFile outPath elmContent
-            putStrLn $ "@[extractGFContent] wrote to " <> outPath
-          Nothing ->
-            putStrLn $ "@[extractGFContent] no target found for discussion: " <> unpack discussion.titleCv <> ", id: " <> unpack discussion.convIdCv
+    makeElmFile :: Mp.Map Text GfTarget -> Jd.Conversation -> IO ()
+    makeElmFile targetMap conversation = do
+      putStrLn . T.unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
+      case Op.discussionToElm conversation of
+        Left err ->
+          putStrLn $ "@[extractGFContent] error: " <> T.unpack err
+        Right elm ->
+          case Mp.lookup conversation.convIdCv targetMap of
+            Just target -> do
+              let outPath = "/tmp/" <> T.unpack target.fileIdGF <> ".elm"
+              let elmContent = elmPreambule target <> "\nmessages = " <> elm <> "\n"
+              Tio.writeFile outPath elmContent
+              putStrLn $ "@[extractGFContent] wrote to " <> outPath
+            Nothing ->
+              putStrLn $
+                "@[extractGFContent] no target found for discussion: "
+                <> T.unpack conversation.titleCv
+                <> ", id: "
+                <> T.unpack conversation.convIdCv
 
-  elmPreambule :: GfTarget -> Text
-  elmPreambule aTarget =
-    let
-      moduleDef = "module LegalNodes.Docs." <> aTarget.fileIdGF <> " exposing (content)\n"
-      importDef = "import Components.LegalNodes.ReferenceDoc.Types as T\n"
-      contentDef = "content = (\"" <> aTarget.titleGF <> "\", \"" <> aTarget.uidGF <> "\", messages)"
-    in
-    intercalate "\n" [
-      moduleDef
-      , importDef
-      , contentDef
-    ]
+    elmPreambule :: GfTarget -> Text
+    elmPreambule target =
+      let moduleDef = "module LegalNodes.Docs." <> target.fileIdGF <> " exposing (content)\n"
+          importDef = "import Components.LegalNodes.ReferenceDoc.Types as T\n"
+          contentDef = "content = (\"" <> target.titleGF <> "\", \"" <> target.uidGF <> "\", messages)"
+      in T.intercalate "\n" [moduleDef, importDef, contentDef]
 
 
 saveDocxFromDiscs :: Opt.OaiGenOpts -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
-saveDocxFromDiscs genOpts pgPool = do
+saveDocxFromDiscs genOpts pgPool =
   case genOpts.group of
     Nothing ->
       case genOpts.targets of
-        [] -> pure . Right $ Left ["@[saveDocxFromDiscs] no targets to save."]
-        someTargets ->
-          let
-            targets = map EidCI someTargets
-          in do
+        [] ->
+          pure . Right $ Left ["@[saveDocxFromDiscs] no targets to save."]
+        someTargets -> do
+          let targets = map EidCI someTargets
           rezA <- mapM (genDocxByDiscId pgPool genOpts.destPath) targets
           pure $ Utl.listResultsToResultList rezA
-    Just aGroup -> do
-      eiDiscussions <- Ddc.allDiscussionsInGroup pgPool aGroup
+    Just groupName -> do
+      eiDiscussions <- Ddc.allDiscussionsInGroup pgPool groupName
       case eiDiscussions of
-        Left err -> pure . Left $ [err]
-        Right discussions ->
-          let
-            targetIDs = V.toList $ V.map (\(uid, title, oaiid) -> UidCI uid) discussions
-          in do
-            rezA <- mapM (genDocxByDiscId pgPool genOpts.destPath) targetIDs
-            pure $ Utl.listResultsToResultList rezA
+        Left err ->
+          pure . Left $ [err]
+        Right discussions -> do
+          let targetIds = V.toList $ V.map (\(uid, _, _) -> UidCI uid) discussions
+          rezA <- mapM (genDocxByDiscId pgPool genOpts.destPath) targetIds
+          pure $ Utl.listResultsToResultList rezA
 
 
 genDocxFromConvs :: [Jd.Conversation] -> IO ()
 genDocxFromConvs conversations =
-  let
-    subTargets = take 1 gfTargets
-  in
-  runOnDiscussionSubset conversations subTargets makeDocX
+  let subTargets = take 1 gfTargets
+  in runOnDiscussionSubset conversations subTargets makeDocX
   where
-  makeDocX :: Mp.Map Text GfTarget -> Jd.Conversation -> IO ()
-  makeDocX targetMap conversation =
-    case Op.analyzeDiscussion conversation of
-      Left err -> putStrLn $ "@[genDocx] error: " <> unpack err
-      Right context ->
-        let
-          outPath = "/tmp/" <> unpack conversation.convIdCv <> ".docx"
-        in do
-        Gd.writeContextDocx context conversation.titleCv outPath
-        putStrLn $ "@[genDocx] wrote to " <> outPath
+    makeDocX :: Mp.Map Text GfTarget -> Jd.Conversation -> IO ()
+    makeDocX _ conversation =
+      case Op.analyzeDiscussion conversation of
+        Left err ->
+          putStrLn $ "@[genDocx] error: " <> T.unpack err
+        Right context -> do
+          let outPath = "/tmp/" <> T.unpack conversation.convIdCv <> ".docx"
+          _ <- Gd.writeContextDocx context conversation.titleCv outPath
+          putStrLn $ "@[genDocx] wrote to " <> outPath
 
 
 storeDiscussions :: [Jd.Conversation] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
-storeDiscussions conversations dbPool =
-  let
-    subTargets = gfTargets
-  in do
-  runOnDiscussionSubset conversations subTargets storeDiscussion
+storeDiscussions conversations dbPool = do
+  runOnDiscussionSubset conversations gfTargets storeDiscussion
   pure . Right . Right $ []
   where
-  storeDiscussion :: Mp.Map Text GfTarget -> Jd.Conversation -> IO ()
-  storeDiscussion targetMap conversation = do
-    putStrLn . unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
-    let
-      rezCtx = Op.analyzeDiscussion conversation
-    case rezCtx of
-      Left err -> putStrLn $ "@[storeDiscussions] error: " <> unpack err
-      Right context -> do
-        rez <- Sdc.storeDiscussion dbPool conversation.titleCv conversation.convIdCv context
-        case rez of
-          Left err -> putStrLn $ "@[storeDiscussions] error: " <> err
-          Right _ -> putStrLn $ "@[storeDiscussions] stored discussion: " <> unpack conversation.titleCv <> ", id: " <> unpack conversation.convIdCv
+    storeDiscussion :: Mp.Map Text GfTarget -> Jd.Conversation -> IO ()
+    storeDiscussion _ conversation = do
+      putStrLn . T.unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
+      case Op.analyzeDiscussion conversation of
+        Left err ->
+          putStrLn $ "@[storeDiscussions] error: " <> T.unpack err
+        Right context -> do
+          rez <- Sdc.storeDiscussion dbPool conversation.titleCv conversation.convIdCv context
+          case rez of
+            Left err ->
+              putStrLn $ "@[storeDiscussions] error: " <> err
+            Right _ ->
+              putStrLn $
+                "@[storeDiscussions] stored discussion: "
+                <> T.unpack conversation.titleCv
+                <> ", id: "
+                <> T.unpack conversation.convIdCv
 
-
-{-
-genDocxFromDiscs :: FilePath -> [ItemIdent] -> Hp.Pool -> IO (Either a1 (Either a2 [Either [String] [Ddc.DiscussionDb]]))
-genDocxFromDiscs destPath targets dbPool = do
-  rezA <- mapM (\target -> genDocxByConvId destPath target.uidGF dbPool) targets
-  pure . Right . Right $ rights rezA
--}
 
 genDocxByDiscId :: Hp.Pool -> FilePath -> ItemIdent -> IO (Either Hp.UsageError (Either String Int64))
-genDocxByDiscId dbPool destPath itemID = do
-  eiRez <- case itemID of
+genDocxByDiscId dbPool destPath itemId = do
+  eiRez <- case itemId of
     EidCI eid -> Ddc.findDiscussionByConvId dbPool eid
     UidCI uid -> Ddc.findDiscussionByUid dbPool uid
+    UuidCI uuid -> pure . Right $ Just uuid
   case eiRez of
     Left err -> do
       putStrLn $ "@[genDocxByConvId] err: " <> err
@@ -523,9 +538,10 @@ genDocxByDiscId dbPool destPath itemID = do
     Right mbUuid ->
       case mbUuid of
         Nothing -> do
-          putStrLn $ "@[genDocxByConvId] no discourse found for id: " <> show itemID
-          pure . Right . Left $ "@[genDocxByConvId] no discourse found for id: " <> show itemID
-        Just uuid -> do
+          let errMsg = "@[genDocxByConvId] no discourse found for id: " <> show itemId
+          putStrLn errMsg
+          pure . Right $ Left errMsg
+        Just uuid ->
           genDocxDb destPath uuid dbPool
 
 
@@ -533,8 +549,7 @@ genDocxDb :: FilePath -> UUID -> Hp.Pool -> IO (Either Hp.UsageError (Either Str
 genDocxDb destPath discourseId dbPool = do
   eiRez <- Ddc.loadDiscussion dbPool discourseId
   case eiRez of
-    Left err -> do
-      -- putStrLn $ "@[genDocxDb] error: " <> err
+    Left err ->
       pure $ Left err
     Right eiMbDiscourse ->
       case eiMbDiscourse of
@@ -542,15 +557,12 @@ genDocxDb destPath discourseId dbPool = do
           pure . Right $ Left err
         Right mbDiscourse ->
           case mbDiscourse of
-            Nothing -> do
-              -- putStrLn $ "@[genDocxDb] no discourse found for id: " <> show discourseId
+            Nothing ->
               pure . Right . Left $ "@[genDocxDb] no discourse found for id: " <> show discourseId
-            Just discourse ->
-              let
-                nameFromTitle = T.replace " " "_" discourse.titleCo
-                outPath = destPath </> unpack nameFromTitle <> "_" <> show discourse.convIdCo <> ".docx"
-              in do
-              Gdb.writeDiscussionDbDocx discourse discourse.titleCo outPath
+            Just discourse -> do
+              let nameFromTitle = T.replace " " "_" discourse.titleCo
+              let outPath = destPath </> T.unpack nameFromTitle <> "_" <> show discourse.convIdCo <> ".docx"
+              _ <- Gdb.writeDiscussionDbDocx discourse discourse.titleCo outPath
               putStrLn $ "@[genDocxDb] wrote to " <> outPath
               pure . Right $ Right discourse.refCo.uidRd
 
@@ -558,48 +570,50 @@ genDocxDb destPath discourseId dbPool = do
 genSummaries :: Opt.TargetsOpts -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [()]))
 genSummaries targetOpts dbPool =
   case targetOpts.groupTO of
-    Just aName -> do
-      eiDiscussions <- Ddc.allDiscussionsInGroup dbPool aName
+    Just groupName -> do
+      eiDiscussions <- Ddc.allDiscussionsInGroup dbPool groupName
       case eiDiscussions of
-        Left err -> pure . Left $ [err]
-        Right discussions ->
-          let
-            targetIDs = V.toList $ V.map (\(_, _, uuid) -> uuid) discussions
-          in do
+        Left err ->
+          pure . Left $ [err]
+        Right discussions -> do
+          let targetIds = V.toList $ V.map (\(_, _, uuid) -> uuid) discussions
           httpManager <- Sm.newOllamaManager
-          rezA <- mapM (genSummariesByDiscEid dbPool httpManager) targetIDs
+          rezA <- mapM (genSummariesByDiscEid dbPool httpManager) targetIds
           pure $ Utl.listResultsToResultList rezA
-    Nothing -> case targetOpts.targetsTO of
-      [] -> pure . Right $ Left ["@[genSummaries] no targets to summarize."]
-      someTargets ->
-        let
-          targetIDs = map EidCI someTargets
-        in do
-        httpManager <- Sm.newOllamaManager
-        -- TODO: recover the proper errors from the inner db ops.
-        rezA <- mapM (\aTarget -> do
-          putStrLn $ "@[genSummaries] searching: " <> show aTarget
-          eiRez <- case aTarget of
-            EidCI eid -> Ddc.findDiscussionByConvId dbPool eid
-            UidCI uid -> Ddc.findDiscussionByUid dbPool uid
-          case eiRez of
-            Left err ->
-              pure . Right $ Left err
-            Right mbDiscourse ->
-              case mbDiscourse of
-                Nothing ->
-                  pure . Right $ Left $ "no discourse found for id: " <> show aTarget
-                Just eid -> genSummariesByDiscEid dbPool httpManager eid
-          ) targetIDs
-        pure $ Utl.listResultsToResultList rezA
+    Nothing ->
+      case targetOpts.targetsTO of
+        [] ->
+          pure . Right $ Left ["@[genSummaries] no targets to summarize."]
+        someTargets -> do
+          let targetIds = map EidCI someTargets
+          httpManager <- Sm.newOllamaManager
+          rezA <- mapM (genOne httpManager) targetIds
+          pure $ Utl.listResultsToResultList rezA
+  where
+    genOne :: Ht.Manager -> ItemIdent -> IO (Either Hp.UsageError (Either String ()))
+    genOne httpManager target = do
+      putStrLn $ "@[genSummaries] searching: " <> show target
+      eiRez <- case target of
+        EidCI eid -> Ddc.findDiscussionByConvId dbPool eid
+        UidCI uid -> Ddc.findDiscussionByUid dbPool uid
+        UuidCI uuid -> pure . Right $ Just uuid
+      case eiRez of
+        Left err ->
+          pure . Right $ Left err
+        Right mbDiscourse ->
+          case mbDiscourse of
+            Nothing ->
+              pure . Right . Left $ "no discourse found for id: " <> show target
+            Just discourseId ->
+              genSummariesByDiscEid dbPool httpManager discourseId
 
 
 genSummariesByDiscEid :: Hp.Pool -> Ht.Manager -> UUID -> IO (Either Hp.UsageError (Either String ()))
-genSummariesByDiscEid dbPool httpManager eid = do
-  eiRezB <- Ddc.loadDiscussion dbPool eid
-  case eiRezB of
+genSummariesByDiscEid dbPool httpManager discourseId = do
+  eiRez <- Ddc.loadDiscussion dbPool discourseId
+  case eiRez of
     Left err ->
-      pure . Left $ err
+      pure $ Left err
     Right eiMbDiscourse ->
       case eiMbDiscourse of
         Left err ->
@@ -607,98 +621,55 @@ genSummariesByDiscEid dbPool httpManager eid = do
         Right mbDiscourse ->
           case mbDiscourse of
             Nothing ->
-              pure . Right . Left $ "no discourse found for id: " <> show eid
+              pure . Right . Left $ "no discourse found for id: " <> show discourseId
             Just discourse -> do
-              -- putStrLn $ "@[genSummaries] summarizing: " <> unpack discourse.titleCo
               rezA <- Sm.summarizeDiscourseMessages dbPool httpManager discourse
               case rezA of
-                Left errs -> pure . Left $ head errs
-                Right opResults -> case opResults of
-                  Left errs -> pure . Right . Left $ L.intercalate "; " errs
-                  Right _ -> pure . Right $ Right ()
+                Left errs ->
+                  pure . Left $ head errs
+                Right opResults ->
+                  case opResults of
+                    Left errs ->
+                      pure . Right . Left $ L.intercalate "; " errs
+                    Right _ ->
+                      pure . Right $ Right ()
 
--- Hp.Pool -> FilePath -> (Int, ItemIdent) -> IO (Either Hp.UsageError (Either String FilePath))
 
 generateElmFromItem :: OperFunction FilePath
-generateElmFromItem dbPool destPath (index, item) = do
+generateElmFromItem dbPool destPath (index, item) =
   case item of
-    EidCI eid -> do
+    EidCI eid ->
       Em.elmifyDiscussionByConvEid destPath eid dbPool ("D" <> (T.pack . show) index)
-    UidCI uid ->
-      pure . Right . Left $ "UID not supported for Elm generation"
+    UidCI _ ->
+      pure . Right $ Left "UID not supported for Elm generation"
     UuidCI uuid ->
       Em.elmifyDiscussionByUuid destPath uuid dbPool ("D" <> (T.pack . show) index)
 
 
-{-
-generateElmFiles :: FilePath -> [GfTarget] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Text]))
-generateElmFiles destPath targets dbPool = do
-  rezA <- mapM (\(index, target) -> do
-    putStrLn $ "@[generateElmFiles] saving: " <> unpack target.uidGF
-    eiRez <- Em.elmifyDiscourseByEid destPath target.uidGF dbPool ("D" <> (T.pack . show) index)
-    case eiRez of
-      Left err -> do
-        putStrLn $ "@[generateElmFiles] error: " <> show err
-        pure . Left $ err
-      Right elm ->
-        pure . Right $ Right [ elm ]
-    ) $ zip [1..] gfTargets
-  pure . Right . Right $ rights []
--}
-
--- Deprecated:
 saveConversationToDocx :: Opt.OaiGenOpts -> Rto.RunOptions -> IO ()
-saveConversationToDocx genOpts rtOpts =
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in
-  putStrLn $ "@[saveConversationToDocx] save to docx not implemented yet"
-  {-
-  Mc.runContT pgPool (conversationToDocx genOpts.destPath)
-  reportDbErrors "saveConversationToDocx" rezA
-  where
-  conversationToDocx :: FilePath -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
-  conversationToDocx destPath target pgPool = do
-    case genOpts.targets of
-      [] -> do
-        putStrLn $ "@[saveConversationToDocx] no targets to save."
-        pure . Right $ Left [ "no targets to save" ]
-      targets -> do
-        rezA <- mapM (\target -> do
-          eiRez <- Ddc.findDiscussionByConvId dbPool target
-          case eiRez of
-            Left err -> do
-              putStrLn $ "@[genDocxByConvId] err: " <> err
-              pure . Right $ Left [ err ]
-            Right mbUuid ->
-              case mbUuid of
-                Nothing -> do
-                  putStrLn $ "@[genDocxByConvId] no discourse found for id: " <> show convId
-                  pure . Right $ Left [ "no discourse found" ]
-                Just uuid -> do
-                  genDocxDb destPath uuid pgPool
-          ) targets
-        pure ()
-  -}
-{-
-  let
-    pgPool = Dbc.startPg rtOpts.pgDbConf
-  in do
-    rezA <- Mc.runContT pgPool (saveElmFiles gfTargets)
-    -- rezA <- Mc.runContT pgPool (genSummaries gfTargets)
-    -- rezA <- Mc.runContT pgPool (genAllDocxs gfTargets)
-    pure ()
-    {-
-    rezA <- Mc.runContT pgPool (storeDiscussions discussions)   -- saveConversations ; storeDiscussions << discussions
-    case rezA of
-      Left err -> do
-        putStrLn $ "@[parseCmd] saving discussions failed: " <> show err
-      Right apiRez -> do
-        case apiRez of
-          Right successInResults ->
-            putStrLn $ "@[parseCmd] saved " <> show (length successInResults) <> " discussions."
-          Left errorInResults ->
-            putStrLn $ "@[parseCmd] logic errors: " <> L.intercalate "\n" errorInResults
-    -}
+saveConversationToDocx _ _ =
+  putStrLn "@[saveConversationToDocx] save to docx not implemented yet"
 
--}
+
+selectJsonTargets :: [Jd.Conversation] -> Opt.TargetsOpts -> ([Jd.Conversation], [Text])
+selectJsonTargets conversations targetsOpts =
+  case targetsOpts.targetsTO of
+    [] -> (conversations, [])
+    targets ->
+      let convByEid = Mp.fromList $ map (\conversation -> (conversation.convIdCv, conversation)) conversations
+          selected = mapMaybe (`Mp.lookup` convByEid) targets
+          missing = filter (`Mp.notMember` convByEid) targets
+      in (selected, missing)
+
+
+reportMissingTargets :: String -> [Text] -> IO ()
+reportMissingTargets opLabel missingTargets =
+  unless (null missingTargets) $
+    putStrLn $
+      "@[" <> opLabel <> "] missing targets: "
+      <> T.unpack (T.intercalate ", " missingTargets)
+
+
+pluralS :: Int -> String
+pluralS count =
+  if count == 1 then "" else "s"

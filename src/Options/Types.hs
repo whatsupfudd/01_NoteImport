@@ -30,17 +30,18 @@ data DocXOpts = DocXOpts {
   } deriving stock (Show)
 
 
-data IngestOpts = IngestOpts
-  { format         :: !Format
-  , input          :: !Input
-  , keepOriginal   :: !Bool
-  , titleOverride  :: !(Maybe Text)
-  , formatLabel    :: !(Maybe Text)
-  , outMode        :: !OutMode
-  , writeJson      :: !(Maybe FilePath)
+data IngestOpts = IngestOpts {
+    format :: !Format
+  , input :: !Input
+  , keepOriginal :: !Bool
+  , titleOverride :: !(Maybe Text)
+  , formatLabel :: !(Maybe Text)
+  , outMode :: !OutMode
+  , writeJson :: !(Maybe FilePath)
   , userName :: !Text
-  , docId          :: !(Maybe Int)
-  } deriving stock (Show)
+  , docId :: !(Maybe Int)
+  }
+  deriving stock (Show)
 
 
 data OaiSubCommand =
