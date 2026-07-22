@@ -33,15 +33,17 @@ data Command =
   | DocXCmd DocXOpts    -- v1 parsing.
   | IngestCmd IngestOpts
   | OaiCmd OaiSubCommand
+  | KmsCmd KmsSubCmd
   deriving stock (Show)
 
-{- HERE: Additional structures for holding new command parameters:
-Eg:
-data ImportOpts = ImportOpts {
-    taxonomy :: Text
-    , path :: Text
-  }
--}
+
+data KmsSubCmd =
+  ListKC KmsLocatorOpts
+  | CreateKC KmsCreateOpts
+  | DeleteKC Text
+  | GetKC KmsGetOpts
+  deriving stock (Show)
+
 
 parseCliOptions :: IO (Either String CliOptions)
 parseCliOptions =
@@ -106,6 +108,7 @@ commandDefs =
       , ("docx", DocXCmd <$> docxOpts, "DocX command.")
       , ("ingest", IngestCmd <$> ingestOpts, "Ingest command.")
       , ("oai", oaiSubCommands, "OpenAI JSON command.")
+      , ("kms", KmsCmd <$> kmsSubCommands, "KMS command.")
       ]
     headArray = head cmdArray
     tailArray = tail cmdArray
@@ -239,3 +242,46 @@ conversationSubCommands =
     <> command "convert" (info (ConvertCS <$> oaiTargetsOpts) (progDesc "Convert a conversation to a discussion."))
     <> command "docx" (info (DocxCS <$> oaiGenOpts) (progDesc "Create DOCX documents."))
   )
+
+kmsSubCommands :: Parser KmsSubCmd
+kmsSubCommands =
+  subparser (
+    command "list" (info (ListKC <$> kmsLocatorOpts) (progDesc "List KMS HBDocs."))
+    <> command "create" (info (CreateKC <$> kmsCreateOpts) (progDesc "Create new KMS HBDoc."))
+    <> command "delete" (info (DeleteKC <$> kmsDocEidOpts) (progDesc "Delete KMS HBDoc by key."))
+    <> command "get" (info (GetKC <$> kmsGetOpts) (progDesc "Get KMS HBDoc by key."))
+  )
+
+
+kmsDocEidOpts :: Parser Text
+kmsDocEidOpts =
+  strOption (long "key" <> short 'k' <> help "The document EID." <> metavar "EID")
+
+
+kmsLocatorOpts :: Parser KmsLocatorOpts
+kmsLocatorOpts =
+  KmsLocatorOpts <$>
+    optional (strOption (long "title" <> short 't' <> help "The title of the document." <> metavar "TITLE"))
+    <*> optional (strOption (long "key" <> short 'k' <> help "The document EID." <> metavar "EID"))
+
+kmsCreateOpts :: Parser KmsCreateOpts
+kmsCreateOpts =
+  KmsCreateOpts <$>
+    strOption (long "title" <> help "The document name." <> metavar "NAME")
+    <*> strOption (long "code" <> help "The document code." <> metavar "CODE")
+    <*> strOption (long "domain" <> help "The document domain." <> metavar "DOMAIN")
+    <*> strOption (long "type" <> help "The document type." <> metavar "TYPE")
+    <*> strOption (long "tier" <> help "The document tier." <> metavar "TIER")
+    <*> strOption (long "status" <> help "The document status." <> metavar "STATUS")
+    <*> strOption (long "owner-user" <> help "The document owner user." <> metavar "OWNER_USER")
+    <*> strOption (long "email" <> help "The document email." <> metavar "EMAIL")
+    <*> optional (strOption (long "residency" <> help "The document residency." <> metavar "RESIDENCY"))
+    <*> switch (long "ai-allowed" <> help "The document AI allowed." <> showDefault)
+    <*> switch (long "legal-hold" <> help "The document legal hold." <> showDefault)
+
+
+kmsGetOpts :: Parser KmsGetOpts
+kmsGetOpts =
+  KmsGetOpts <$>
+    strOption (long "key" <> short 'k' <> help "The document EID." <> metavar "EID")
+    <*> strArgument (metavar "FILEPATH" <> help "The file path to save the document." <> value "")

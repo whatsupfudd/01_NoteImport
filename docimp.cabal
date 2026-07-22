@@ -29,6 +29,7 @@ library
       Commands.DocX
       Commands.Help
       Commands.Ingest
+      Commands.Kms
       Commands.Notion
       Commands.OpenAI
       Commands.Version

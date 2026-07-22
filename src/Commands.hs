@@ -5,6 +5,7 @@ module Commands  (
   , module Commands.DocX
   , module Commands.Ingest
   , module Commands.OpenAI
+  , module Commands.Kms
  )
 where
 
@@ -14,3 +15,4 @@ import Commands.Notion
 import Commands.DocX
 import Commands.Ingest
 import Commands.OpenAI
+import Commands.Kms

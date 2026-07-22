@@ -97,3 +97,79 @@ data ConversationSubCommand =
   | ConvertCS TargetsOpts
   | DocxCS OaiGenOpts
   deriving stock (Show)
+
+
+-- KMS options:
+data KmsLocatorOpts = KmsLocatorOpts {
+  title :: Maybe Text
+  , key :: Maybe Text
+} deriving stock (Show)
+
+
+data KmsGetOpts = KmsGetOpts {
+  key :: Text
+  , filePath :: FilePath
+} deriving stock (Show)
+
+{-
+The creation logic needs this:
+ raw input: (Text, Int32, Int32, Int32, Int32, Maybe Text, Bool, Bool, Maybe Day, Int32)
+SQL operation:
+ insert into document (title, domain_fk, doc_type_fk, tier_fk, status_fk,
+     owner_user_fk, residency, ai_allowed, legal_hold, due_date,
+     created_by_user_fk)
+  values
+    ($1::text, $2::int4, $3::int4 ,$4::int4 ,$5::int4
+    , $6::text?, $7::bool, $8::bool, $9::date?
+    , $10::int4)
+
+and:
+
+AddAcl :: St.Statement (Int32, Text, Maybe Int32, Maybe Int32, Maybe Int32, Maybe Int32, Vector Text, Maybe Text, Maybe Text, Int32) Int32
+qAddAcl =
+  [singletonStatement|
+    insert into kms.document_acl
+      ( document_fk
+      , principal
+      , user_fk
+      , group_fk
+      , role_fk
+      , org_fk
+      , rights
+      , scope
+      , scope_value
+      , created_by_user_fk
+      )
+    values
+      ( $1::int4
+      , $2::text
+      , $3::int4?
+      , $4::int4?
+      , $5::int4?
+      , $6::int4?
+      , $7::text[]
+      , $8::text?
+      , $9::text?
+      , $10::int4
+      )
+    returning uid::int4
+  |]
+
+On the CLI, we get the textual values for each required parameter, they will be converted by the Commands.Kms logic.
+-}
+
+
+data KmsCreateOpts = KmsCreateOpts {
+  docTitle :: Text
+  , code :: Text
+  , domainDC :: Text
+  , typeDC :: Text
+  , tierDC :: Text
+  , statusDC :: Text
+  , ownerUserDC :: Text
+  , emailDC :: Text
+  , residencyDC :: Maybe Text
+  , aiAllowedDC :: Bool
+  , legalHoldDC :: Bool
+  }
+  deriving stock (Show)

@@ -34,6 +34,7 @@ runWithOptions cliOptions fileOptions = do
             Opt.DocXCmd aDocXOpts -> Cmd.loadDoc aDocXOpts
             Opt.IngestCmd aIngestOpts -> Cmd.runIngest aIngestOpts
             Opt.OaiCmd args -> Cmd.oaiCmd args
+            Opt.KmsCmd args -> Cmd.kmsCmd args
       rtOptions <- Opt.mergeOptions cliOptions fileOptions envOptions
       result <- cmdExecutor rtOptions
       -- TODO: return a properly kind of conclusion.
