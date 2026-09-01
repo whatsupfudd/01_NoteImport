@@ -17,6 +17,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as Tio
 import Data.UUID (UUID)
+import qualified Data.UUID as Uu
+import qualified Data.UUID.V4 as Uu
 import qualified Data.Vector as V
 
 import System.FilePath ((</>))
@@ -82,17 +84,24 @@ gfTargets =
   in map (\(fileId, title, uid) -> GfTarget fileId title uid) rawEntries
 
 
-parseJson :: FilePath -> Bool -> IO (Either String [Jd.Conversation])
+parseJson :: FilePath -> Bool -> IO (Either String [(Jd.Conversation, Text)])
 parseJson jsonFile exportB = do
   jsonContent <- BS.readFile jsonFile
   if exportB then
-    pure (Ae.eitherDecode jsonContent :: Either String [Jd.Conversation])
+    let
+      eiConversations = Ae.eitherDecode jsonContent :: Either String [Jd.Conversation]
+    in
+    case eiConversations of
+      Left errMsg -> pure $ Left errMsg
+      Right conversations -> do
+        convKeys <- mapM (const Uu.nextRandom) conversations
+        pure . Right $ zipWith (\conv key -> (conv, Uu.toText key)) conversations convKeys
   else
     case Ae.eitherDecode jsonContent :: Either String Jd.Conversation of
       Left errMsg -> pure $ Left errMsg
       Right jsonConv -> do
         putStrLn $ "@[parseJson] jsonConv: " <> T.unpack jsonConv.convIdCv
-        pure . Right $ [jsonConv]
+        pure . Right $ [(jsonConv, jsonConv.convIdCv)]
 
 
 printJson :: Opt.OaiPrintOpts -> Opt.TargetsOpts -> IO ()
@@ -101,7 +110,8 @@ printJson printOpts targetsOpts = do
   case rezA of
     Left err -> putStrLn $ "Parsing failed: " <> err
     Right conversations -> do
-      let (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
+      let
+        (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
       reportMissingTargets "printJson" missingTargets
       if null targetConvs then
         putStrLn "@[printJson] no conversations selected."
@@ -113,24 +123,23 @@ storeJsonAsConversations :: Opt.OaiStoreOpts -> Opt.TargetsOpts -> Rto.RunOption
 storeJsonAsConversations storeOpts targetsOpts rtOpts = do
   rezA <- parseJson storeOpts.jsonFileST storeOpts.exportB
   case rezA of
-    Left err ->
-      putStrLn $ "Parsing failed: " <> err
+    Left err -> putStrLn $ "Parsing failed: " <> err
     Right conversations -> do
-      let (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
+      let
+        (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
       reportMissingTargets "storeJsonAsConversations" missingTargets
       if null targetConvs then
         putStrLn "@[storeJsonAsConversations] no conversations selected."
-      else do
-        let source = sourceFromStore storeOpts
-        let opts = optsFromStore storeOpts
-        let pgPool = Dbc.startPg rtOpts.pgDbConf
-        rezB <- Mc.runContT pgPool $ \pool ->
-          Ib.runBatch Nothing pool source opts targetConvs
+      else
+        let
+          source = sourceFromStore storeOpts
+          opts = optsFromStore storeOpts
+          pgPool = Dbc.startPg rtOpts.pgDbConf
+        in do
+        rezB <- Mc.runContT pgPool $ \pool -> Ib.runBatch Nothing pool source opts targetConvs
         case rezB of
-          Left errs ->
-            putStrLn $ "@[storeJsonAsConversations] db err: " <> show errs
-          Right batch ->
-            Tio.putStrLn $ Ir.renderBatch batch
+          Left errs -> putStrLn $ "@[storeJsonAsConversations] db err: " <> show errs
+          Right batch -> Tio.putStrLn $ Ir.renderBatch batch
 
 
 sourceFromStore :: Opt.OaiStoreOpts -> Im.Source
@@ -367,7 +376,7 @@ convStoreADiscussion pgPool target = do
                       pure . Right $ Right ctxUid
 
 
-saveConversations :: [Jd.Conversation] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
+saveConversations :: [(Jd.Conversation, Text)] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
 saveConversations conversations pgPool = do
   putStrLn "@[saveConversations] deprecated; use OpenAI.Import.Batch.runBatch."
   let source =
@@ -401,8 +410,8 @@ saveConversations conversations pgPool = do
              Right $ Left failMsgs
 
 
-showConversation :: Jd.Conversation -> IO ()
-showConversation conversation = do
+showConversation :: (Jd.Conversation, Text) -> IO ()
+showConversation (conversation, sourceKey) = do
   putStrLn . T.unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.convIdCv
   let (analysis, issues) = Op.showDiscussion conversation
   putStrLn . T.unpack $ analysis
@@ -651,14 +660,15 @@ saveConversationToDocx _ _ =
   putStrLn "@[saveConversationToDocx] save to docx not implemented yet"
 
 
-selectJsonTargets :: [Jd.Conversation] -> Opt.TargetsOpts -> ([Jd.Conversation], [Text])
+selectJsonTargets :: [(Jd.Conversation, Text)] -> Opt.TargetsOpts -> ([(Jd.Conversation, Text)], [Text])
 selectJsonTargets conversations targetsOpts =
   case targetsOpts.targetsTO of
     [] -> (conversations, [])
     targets ->
-      let convByEid = Mp.fromList $ map (\conversation -> (conversation.convIdCv, conversation)) conversations
-          selected = mapMaybe (`Mp.lookup` convByEid) targets
-          missing = filter (`Mp.notMember` convByEid) targets
+      let
+        convByEid = Mp.fromList $ map (\(conversation, sourceKey) -> (conversation.convIdCv, (conversation, sourceKey))) conversations
+        selected = mapMaybe (`Mp.lookup` convByEid) targets
+        missing = filter (`Mp.notMember` convByEid) targets
       in (selected, missing)
 
 

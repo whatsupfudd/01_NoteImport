@@ -34,11 +34,30 @@ library
       Commands.OpenAI
       Commands.Version
       DB.Connect
+      Firefly.JsReader
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
+      OpenAI.Content.Codec
+      OpenAI.Content.Hash
+      OpenAI.Content.Kind
+      OpenAI.Content.Read
+      OpenAI.Content.Types
+      OpenAI.Content.Write
       OpenAI.Conversation
       OpenAI.ConvToDisc
+      OpenAI.Delta.Apply
+      OpenAI.Delta.Hash
+      OpenAI.Delta.Index
+      OpenAI.Delta.Match
+      OpenAI.Delta.Plan
+      OpenAI.Delta.Report
+      OpenAI.Delta.Snap
+      OpenAI.Delta.Snap.Db
+      OpenAI.Delta.Snap.Json
+      OpenAI.Delta.Types
+      OpenAI.Delta.Validate
+      OpenAI.Deserialize.ContentStmt
       OpenAI.Deserialize.Conversation
       OpenAI.Deserialize.ConversationStmt
       OpenAI.Deserialize.Discussion
@@ -59,10 +78,14 @@ library
       OpenAI.Import.Summary
       OpenAI.Import.Types
       OpenAI.Json.Reader
+      OpenAI.Json.Utils
+      OpenAI.Json.V1
+      OpenAI.Json.V2
       OpenAI.Order
       OpenAI.Parse
       OpenAI.ProjFetcher
       OpenAI.Serialize.Content
+      OpenAI.Serialize.ContentStmt
       OpenAI.Serialize.Conversation
       OpenAI.Serialize.ConversationStmt
       OpenAI.Serialize.Discussion
@@ -189,6 +212,7 @@ test-suite docimp-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      TestJson
       Paths_docimp
   hs-source-dirs:
       test

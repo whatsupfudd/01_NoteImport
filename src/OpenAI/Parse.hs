@@ -86,7 +86,7 @@ messageToElm message index =
       let
         content = map subActionToElm assistantMsg.subActions
             <> [ "T.LineSep"
-                , "T.Basic \"\"\"" <> maybe "No response" (\rep -> sanitizeText rep.textRA) assistantMsg.response <> "\"\"\"" 
+                , "T.Basic \"\"\"" <> maybe "No response" (\rep -> sanitizeText rep.textRA) assistantMsg.response <> "\"\"\""
                ]
       in
       "{ id = \"" <> msgID
@@ -296,12 +296,21 @@ handleAssistantMsg context message =
   thoughtsP timing thoughts sourceAnalysisMsgId =
     let
       -- They need to be backward as we reverse the list later.
-      subActions = map (\aThought -> ReflectionSA Reflection {
+      subActions = map (\aThought ->
+        let
+          chunkArray = case aThought.chunksTh of
+            Nothing -> []
+            Just aValue -> case Ae.fromJSON aValue of
+              Ae.Error err -> []
+              Ae.Success chunkArray -> chunkArray
+        in
+        ReflectionSA Reflection {
             summaryRF =  aThought.summaryTh
           , contentRF = aThought.contentTh
-          , chunksRF = maybe [] (map (T.pack . show)) aThought.chunksTh
+          , chunksRF = chunkArray
           , finishedRF = aThought.finishedTh
-          }) $ reverse thoughts
+          }
+        ) $ reverse thoughts
       ieNewMsg = case context.currentMsg of
         Just prevMsg ->
           case prevMsg of

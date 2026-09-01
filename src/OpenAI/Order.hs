@@ -5,6 +5,7 @@ module OpenAI.Order
   , buildNodeOrd
   , rootEidNode
   , renderOrdIssues
+  , renderOrdIssue
   ) where
 
 import Data.Int (Int32)
@@ -30,8 +31,7 @@ data NodeOrd = NodeOrd
   }
   deriving stock (Eq, Show)
 
-data OrdIssue
-  = MissingRootOI
+data OrdIssue = MissingRootOI
   | MissingNodeOI Text
   | MissingParentOI Text Text
   | CycleOI Text
