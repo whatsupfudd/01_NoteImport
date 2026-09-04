@@ -69,6 +69,7 @@ data OaiStoreOpts = OaiStoreOpts {
   , summariseB :: !Bool
   , dryRunB :: !Bool
   , jsonFileST :: !FilePath
+  , followFilesST :: [FilePath]
   } deriving stock (Show)
 
 

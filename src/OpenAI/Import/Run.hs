@@ -18,14 +18,14 @@ import qualified OpenAI.Import.Raw as Ir
 import qualified OpenAI.Import.Report as Ire
 import qualified OpenAI.Import.Summary as Is
 import qualified OpenAI.Import.Types as It
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Json.Schema as Jd
 
 
 planOne :: It.Opts -> Maybe Il.RowConv -> Jd.Conversation -> Either Ire.Report (It.ConvState, It.Action)
 planOne opts mbRow conv =
   case Id.validate conv of
     Left issues -> Left $ Ire.Report {
-            eidConv = conv.convIdCv
+            eidConv = conv.oaiIdCv
           , uidConv = Nothing
           , uidDisc = Nothing
           , action = It.FailA
@@ -33,17 +33,26 @@ planOne opts mbRow conv =
           , notes = fmap Ire.WarnN issues
           }
     Right _ ->
-      let
-        state = Id.classify mbRow conv
-        act = Id.choose opts state conv
-      in
-        Right (state, act)
+      case Id.classify mbRow conv of
+        Left issue -> Left $ Ire.Report {
+            eidConv = conv.oaiIdCv
+          , uidConv = Nothing
+          , uidDisc = Nothing
+          , action = It.FailA
+          , count = Ire.emptyCount { Ire.failCnt = 1 }
+          , notes = [Ire.WarnN issue]
+          }
+        Right state ->
+          let
+            act = Id.choose opts state conv
+          in
+            Right (state, act)
 
 
 runOne :: Maybe Ht.Manager -> Hp.Pool -> It.Source -> It.Opts -> Jd.Conversation -> Text
     -> IO (Either Hp.UsageError Ire.Report)
 runOne mgr pool _src opts conv sourceKey= do
-  mbRowE <- Il.byEid pool conv.convIdCv
+  mbRowE <- Il.byEid pool conv.oaiIdCv
   case mbRowE of
     Left dbErr -> pure $ Left dbErr
     Right mbRow ->
@@ -83,12 +92,12 @@ finish mgr pool opts uidMb conv rawE =
     Left dbErr -> pure $ Left dbErr
     Right (Left err) -> pure $ Right $ errorReport uidMb conv err
     Right (Right report0) -> do
-      discE <- Ids.sync pool opts conv.convIdCv report0
+      discE <- Ids.sync pool opts conv.oaiIdCv report0
       case discE of
         Left dbErr -> pure $ Left dbErr
         Right (Left err) -> pure $ Right $ addNote (Ire.WarnN err) report0
         Right (Right report1) -> do
-          sumE <- Is.sync mgr pool opts conv.convIdCv report1
+          sumE <- Is.sync mgr pool opts conv.oaiIdCv report1
           case sumE of
             Left dbErr -> pure $ Left dbErr
             Right (Left err) -> pure $ Right $ addNote (Ire.WarnN err) report1
@@ -99,26 +108,26 @@ dryReport :: Maybe Il.RowConv -> Jd.Conversation -> It.ConvState -> It.Action ->
 dryReport mbRow conv state act =
   baseReport
     (uidFromState state <|> uidFromRow mbRow)
-    conv.convIdCv
+    conv.oaiIdCv
     act
     (countFor act)
     (Ire.InfoN "dry-run" : notesDry state act)
 
 skipReport :: Maybe Int64 -> Jd.Conversation -> It.ConvState -> Ire.Report
 skipReport uidMb conv state =
-  baseReport uidMb conv.convIdCv It.SkipOlderA (countFor It.SkipOlderA) (notesSkip state)
+  baseReport uidMb conv.oaiIdCv It.SkipOlderA (countFor It.SkipOlderA) (notesSkip state)
 
 sameReport :: Maybe Int64 -> Jd.Conversation -> It.ConvState -> Ire.Report
 sameReport uidMb conv state =
-  baseReport uidMb conv.convIdCv It.SkipSameA (countFor It.SkipSameA) (notesSame state)
+  baseReport uidMb conv.oaiIdCv It.SkipSameA (countFor It.SkipSameA) (notesSame state)
 
 failReport :: Maybe Int64 -> Jd.Conversation -> T.Text -> Ire.Report
 failReport uidMb conv msg =
-  baseReport uidMb conv.convIdCv It.FailA (countFor It.FailA) [Ire.ErrorN msg]
+  baseReport uidMb conv.oaiIdCv It.FailA (countFor It.FailA) [Ire.ErrorN msg]
 
 errorReport :: Maybe Int64 -> Jd.Conversation -> T.Text -> Ire.Report
 errorReport uidMb conv msg =
-  baseReport uidMb conv.convIdCv It.FailA (countFor It.FailA) [Ire.ErrorN msg]
+  baseReport uidMb conv.oaiIdCv It.FailA (countFor It.FailA) [Ire.ErrorN msg]
 
 baseReport :: Maybe Int64 -> T.Text -> It.Action -> Ire.Count -> [Ire.Note] -> Ire.Report
 baseReport uidMb eid act cnt notes =

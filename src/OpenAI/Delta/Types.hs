@@ -18,6 +18,7 @@ module OpenAI.Delta.Types (
 
 import Data.ByteString (ByteString)
 import Data.Int (Int32, Int64)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 
 
@@ -46,12 +47,12 @@ data MetaAct =
   | UpdateMeta {
       oldTitle :: Text
       , newTitle :: Text
-      , oldTimeUpd :: Double
-      , newTimeUpd :: Double
+      , oldTimeUpd :: Scientific
+      , newTimeUpd :: Scientific
     }
   | RejectOlderMeta {
-      dbTimeUpd :: Double
-      , jsTimeUpd :: Double
+      dbTimeUpd :: Scientific
+      , jsTimeUpd :: Scientific
     }
   deriving stock (Eq, Show)
 

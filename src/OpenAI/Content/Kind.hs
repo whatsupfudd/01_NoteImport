@@ -6,7 +6,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import OpenAI.Content.Types (IssueC(..), KindC(..), PartPL(..))
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Json.Schema as Jd
 
 
 data KindPart
@@ -64,7 +64,7 @@ kindFromJson content =
     Jd.TetherQuoteCT {} -> TetherQuoteKC
     Jd.TextCT {} -> TextKC
     Jd.ThoughtsCT {} -> ThoughtsKC
-    Jd.OtherCT {Jd.contentTypeOc = kindTxt} -> OtherKC kindTxt
+    Jd.OtherCT info -> OtherKC info.contentTypeOpl
 
 
 textPP :: PartPL -> Text

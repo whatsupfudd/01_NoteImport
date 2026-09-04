@@ -1,4 +1,4 @@
-module OpenAI.Deserialize.Conversation where
+module OpenAI.Conversation.Deserialize.Conversation where
 
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, throwE)
@@ -6,8 +6,10 @@ import Data.Char (toLower)
 import Data.Int (Int32, Int64)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Mp
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as St
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Vector (Vector)
@@ -23,7 +25,8 @@ import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Txs
 
 import qualified OpenAI.Conversation as Cv
-import qualified OpenAI.Deserialize.ConversationStmt as Dst
+import qualified OpenAI.Conversation.Deserialize.ConversationStmt as Dst
+import qualified OpenAI.Utils as Ut
 
 
 type CodeVal = (Text, Maybe Text, Text)
@@ -229,8 +232,8 @@ buildConversationDb (convUid, title, eid, timeCreate, timeUpdate) nodeRows msgRo
       Cv.uidCv = convUid
       , Cv.titleCv = title
       , Cv.eidCv = eid
-      , Cv.createTimeCv = timeCreate
-      , Cv.updateTimeCv = timeUpdate
+      , Cv.createTimeCv = fromMaybe 0 $ Ut.safeScientific timeCreate
+      , Cv.updateTimeCv = fromMaybe 0 $ Ut.safeScientific timeUpdate
       , Cv.nodesCv = nodesMap
     }
 
@@ -251,11 +254,11 @@ messageFromRow contentsByMessage (_, uidMsg, eidMsg, timeCreate, timeUpdate, sta
   Cv.MessageDb {
       Cv.uidMsg = uidMsg
       , Cv.eidMsg = eidMsg
-      , Cv.createTimeMsg = timeCreate
-      , Cv.updateTimeMsg = timeUpdate
+      , Cv.createTimeMsg = fromMaybe 0 . Ut.safeScientific <$> timeCreate
+      , Cv.updateTimeMsg = fromMaybe 0 . Ut.safeScientific <$> timeUpdate
       , Cv.statusMsg = status
       , Cv.endTurnMsg = endTurn
-      , Cv.weightMsg = weight
+      , Cv.weightMsg = fromMaybe 0 $ Ut.safeScientific weight
       , Cv.metadataMsg = metadata
       , Cv.recipientMsg = recipient
       , Cv.channelMsg = channel
@@ -538,7 +541,7 @@ realtimeFromRow (_, _, expiry, frames, videoContainer, audioStart) =
       Cv.expiryDatetimeRtuav = expiry
       , Cv.framesAssetPointersRtuav = frames
       , Cv.videoContainerAssetPointerRtuav = videoContainer
-      , Cv.audioStartTimestampRtuav = audioStart
+      , Cv.audioStartTimestampRtuav = fromMaybe 0 . Ut.safeScientific <$> audioStart
     }
 
 
@@ -553,8 +556,8 @@ mkAudioMeta (_, startTimestamp, endTimestamp, pretokenizedVq, interruptions, ori
       , Cv.originalAudioSourceAm = originalSource
       , Cv.transcriptionAm = transcription
       , Cv.wordTranscriptionAm = wordTranscription
-      , Cv.startStampAm = startStamp
-      , Cv.endStampAm = endStamp
+      , Cv.startStampAm = fromMaybe 0 $ Ut.safeScientific startStamp
+      , Cv.endStampAm = fromMaybe 0 $ Ut.safeScientific endStamp
     }
 
 

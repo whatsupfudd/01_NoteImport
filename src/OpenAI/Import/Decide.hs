@@ -5,33 +5,37 @@ module OpenAI.Import.Decide
   ) where
 
 import qualified Data.Map.Strict as Mp
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
+
 import OpenAI.Import.Lookup (RowConv(..))
 import OpenAI.Import.Types (Action(..), ConvState(..), Opts (..), Policy (..))
-import qualified OpenAI.Json.Reader as Jd
-import qualified OpenAI.Order as Oor
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Json.V1.Order as Oor
+import OpenAI.Utils (safeScientific)
+
 
 validate :: Jd.Conversation -> Either [Text] Text
 validate conv =
   case errs of
-    [] -> Right conv.convIdCv
+    [] -> Right conv.oaiIdCv
     _ -> Left errs
   where
-    errs =
-      eidIssues conv
-        <> timeIssues conv
-        <> mappingIssues conv
+    errs = eidIssues conv
+        -- <> timeIssues conv
+        -- <> mappingIssues conv
 
-classify :: Maybe RowConv -> Jd.Conversation -> ConvState
-classify Nothing conv =
-  AbsentCS conv.convIdCv
+classify :: Maybe RowConv -> Jd.Conversation -> Either Text ConvState
+classify mbRow conv =
+  case mbRow of
+    Nothing -> Right $ AbsentCS conv.oaiIdCv
+    Just row ->
+      if conv.updateTimeCv < row.timeUpdateCv then
+        Right $ OlderCS row.uidConv row.eidConv row.timeUpdateCv conv.updateTimeCv
+      else
+        Right $ PresentCS row.uidConv row.eidConv row.titleConv row.timeUpdateCv
 
-classify (Just row) conv
-  | conv.updateTimeCv < row.timeUpdateCv =
-      OlderCS row.uidConv row.eidConv row.timeUpdateCv conv.updateTimeCv
-  | otherwise =
-      PresentCS row.uidConv row.eidConv row.titleConv row.timeUpdateCv
 
 choose :: Opts -> ConvState -> Jd.Conversation -> Action
 choose opts state _ =
@@ -45,13 +49,16 @@ choose opts state _ =
 
 eidIssues :: Jd.Conversation -> [Text]
 eidIssues conv =
-  ["conversation_id is empty" | T.null (T.strip conv.convIdCv)]
+  ["conversation_id is empty" | T.null (T.strip conv.oaiIdCv)]
 
+{-
+Deprecated with V2 conversations.
 timeIssues :: Jd.Conversation -> [Text]
 timeIssues conv =
-  issueTime "create_time" conv.createTimeCv
-    <> issueTime "update_time" conv.updateTimeCv
+  issueTime "create_time" conv.createTimeCv <> issueTime "update_time" conv.updateTimeCv
+-}
 
+{-
 mappingIssues :: Jd.Conversation -> [Text]
 mappingIssues conv
   | Mp.null conv.mappingCv = ["conversation mapping is empty"]
@@ -63,14 +70,14 @@ mappingIssues conv
         Left issues ->
           let fatalIssues = filter isFatalOI issues
           in map renderOI fatalIssues
+-}
 
 issueTime :: Text -> Double -> [Text]
-issueTime label timeD =
-  ["conversation " <> label <> " is not finite" | not (finiteD timeD)]
+issueTime label timeD
+  | isNaN timeD = ["conversation " <> label <> ": time is not a number (" <> T.pack (show timeD) <> ")"]
+  | isInfinite timeD = ["conversation " <> label <> ": time is infinite. "]
+  | otherwise  = []
 
-finiteD :: Double -> Bool
-finiteD x =
-  not (isNaN x || isInfinite x)
 
 isFatalOI :: Oor.OrdIssue -> Bool
 isFatalOI issue =

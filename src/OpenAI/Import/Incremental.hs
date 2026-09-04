@@ -10,7 +10,7 @@ import Data.Int (Int64)
 import qualified Hasql.Transaction as Tx
 
 import qualified OpenAI.Conversation as Cv
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Json.Schema as Jd
 
 
 data ImportReport = ImportReport {

@@ -9,10 +9,11 @@ import qualified Data.List  as L
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Mp
 import Data.Maybe (isJust, isNothing, listToMaybe)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Vector as V
 
-import OpenAI.Order (NodeOrd(..))
+import OpenAI.Conversation.Json.V1.Order (NodeOrd(..))
 
 
 -- | Root representation of a raw OpenAI conversation as stored in 'oai.conversations'.
@@ -20,8 +21,8 @@ data ConversationDb = ConversationDb {
     uidCv :: Int64
   , titleCv :: Text
   , eidCv :: Text
-  , createTimeCv :: Double
-  , updateTimeCv :: Double
+  , createTimeCv :: Scientific
+  , updateTimeCv :: Scientific
   , nodesCv :: Map Text NodeDb
   } deriving (Eq, Show)
 
@@ -42,11 +43,11 @@ data NodeDb = NodeDb {
 data MessageDb = MessageDb {
     uidMsg :: Int64
   , eidMsg :: Text
-  , createTimeMsg :: Maybe Double
-  , updateTimeMsg :: Maybe Double
+  , createTimeMsg :: Maybe Scientific
+  , updateTimeMsg :: Maybe Scientific
   , statusMsg :: Text
   , endTurnMsg :: Maybe Bool
-  , weightMsg :: Double
+  , weightMsg :: Scientific
   , metadataMsg :: Value
   , recipientMsg :: Text
   , channelMsg :: Maybe Text
@@ -148,7 +149,7 @@ data RealTimeUserAVDb = RealTimeUserAVDb {
     expiryDatetimeRtuav :: Maybe Value
   , framesAssetPointersRtuav :: Value
   , videoContainerAssetPointerRtuav :: Maybe Value
-  , audioStartTimestampRtuav :: Maybe Double
+  , audioStartTimestampRtuav :: Maybe Scientific
   } deriving (Eq, Show)
 
 
@@ -212,8 +213,8 @@ data AudioMetadataDb = AudioMetadataDb {
   , originalAudioSourceAm :: Maybe Value
   , transcriptionAm :: Maybe Value
   , wordTranscriptionAm :: Maybe Value
-  , startStampAm :: Double
-  , endStampAm :: Double
+  , startStampAm :: Scientific
+  , endStampAm :: Scientific
   } deriving (Eq, Show)
 
 

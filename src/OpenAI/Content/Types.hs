@@ -3,6 +3,7 @@
 module OpenAI.Content.Types where
 
 import Data.Int (Int32, Int64)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 
 import qualified Data.Aeson as Ae
@@ -97,7 +98,7 @@ data PartPL
 
 
 data AudioPtr = AudioPtr {
-    expiryAudio :: Maybe Ae.Value
+    expiryAudio :: Maybe Scientific
     , assetAudio :: Text
     , sizeAudio :: Int64
     , formatAudio :: Text
@@ -119,11 +120,11 @@ data ImagePtr = ImagePtr {
 
 
 data AvPtr = AvPtr {
-    expiryAv :: Maybe Ae.Value
+    expiryAv :: Maybe Scientific
     , framesAv :: [Ae.Value]
     , videoAv :: Maybe Ae.Value
     , audioAv :: AudioPtr
-    , startTimestampAv :: Maybe Double
+    , startTimestampAv :: Maybe Scientific
   }
   deriving stock (Eq, Show)
 
@@ -147,15 +148,15 @@ data ImageMeta = ImageMeta {
 
 
 data AudioMeta = AudioMeta {
-    startTimestampAudio :: Maybe Ae.Value
-    , endTimestampAudio :: Maybe Ae.Value
+    startTimestampAudio :: Maybe Scientific
+    , endTimestampAudio :: Maybe Scientific
     , pretokenizedVqAudio :: Maybe Ae.Value
     , interruptionsAudio :: Maybe Ae.Value
     , originalSourceAudio :: Maybe Ae.Value
     , transcriptionAudio :: Maybe Ae.Value
     , wordTranscriptionAudio :: Maybe Ae.Value
-    , startAudio :: Double
-    , endAudio :: Double
+    , startAudio :: Scientific
+    , endAudio :: Scientific
   }
   deriving stock (Eq, Show)
 

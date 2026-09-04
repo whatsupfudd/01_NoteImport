@@ -7,7 +7,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Hasql.Pool as Hp
 import qualified Network.HTTP.Client as Ht
-import qualified OpenAI.Deserialize.Discussion as Dds
+import qualified OpenAI.Discussion.Deserialize.Discussion as Dds
 import qualified OpenAI.Import.Report as Ir
 import qualified OpenAI.Import.Types as It
 import qualified OpenAI.Summarisation as Sm

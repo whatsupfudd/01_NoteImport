@@ -1,10 +1,11 @@
 {-# LANGUAGE DerivingStrategies #-}
 
-module OpenAI.Serialize.Conversation where
+module OpenAI.Conversation.Serialize.Conversation where
 
 import Data.Int (Int32, Int64)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
+import Data.Scientific (Scientific, toRealFloat)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -12,10 +13,11 @@ import qualified Hasql.Pool as Hp
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Txs
 
-import OpenAI.Json.Reader (Conversation (..), Node (..), Message (..))
-import qualified OpenAI.Order as Oor
-import qualified OpenAI.Serialize.Content as Cw
-import qualified OpenAI.Serialize.ConversationStmt as St
+import OpenAI.Conversation.Json.Schema (Conversation (..), Message (..))
+import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+import qualified OpenAI.Conversation.Json.V1.Order as Oor
+import qualified OpenAI.Conversation.Serialize.Content as Cw
+import qualified OpenAI.Conversation.Serialize.ConversationStmt as St
 
 
 data ReportRawAdd = ReportRawAdd {
@@ -70,12 +72,12 @@ useTx pool transaction =
   Hp.use pool $ Txs.transaction Txs.ReadCommitted Txs.Write transaction
 
 
-addConversation :: Hp.Pool -> Conversation -> IO (Either Hp.UsageError (Either String Int64))
+addConversation :: Hp.Pool -> Jv1.Conversation -> IO (Either Hp.UsageError (Either String Int64))
 addConversation pool conversation =
   fmap (fmap (fmap (.uidConv))) $ addConversationR pool conversation
 
 
-addConversationR :: Hp.Pool -> Conversation -> IO (Either Hp.UsageError (Either String ReportRawAdd))
+addConversationR :: Hp.Pool -> Jv1.Conversation -> IO (Either Hp.UsageError (Either String ReportRawAdd))
 addConversationR pool conversation =
   case Oor.buildNodeOrd conversation.mappingCv of
     Left issues ->
@@ -105,24 +107,24 @@ reportRawAdd convUid stat =
     }
 
 
-addConversationRoot :: Conversation -> Tx.Transaction Int64
+addConversationRoot :: Jv1.Conversation -> Tx.Transaction Int64
 addConversationRoot conversation =
   Tx.statement
     ( conversation.titleCv
     , conversation.convIdCv
-    , conversation.createTimeCv
-    , conversation.updateTimeCv
+    , toRealFloat conversation.createTimeCv
+    , toRealFloat conversation.updateTimeCv
     )
     St.insertConversation
 
 
-addOrderedNodesSession :: Int64 -> Mp.Map Text Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
+addOrderedNodesSession :: Int64 -> Mp.Map Text Jv1.Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
       -> Tx.Transaction (Either String ())
 addOrderedNodesSession convUid mapping ordByEid ordsAsc =
   fmap (fmap (const ())) $ addOrderedNodesReportSession convUid mapping ordByEid ordsAsc
 
 
-addOrderedNodesReportSession :: Int64 -> Mp.Map Text Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
+addOrderedNodesReportSession :: Int64 -> Mp.Map Text Jv1.Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
       -> Tx.Transaction (Either String StatRawAdd)
 addOrderedNodesReportSession convUid mapping ordByEid ordsAsc
   | Mp.size ordByEid /= length ordsAsc =
@@ -178,13 +180,13 @@ sortNodeOrds =
   L.sortOn $ \nodeOrd -> (nodeOrd.seqPre, nodeOrd.seqNode, nodeOrd.seqChild, nodeOrd.eidNode)
 
 
-addNode :: Int64 -> Maybe Int64 -> Text -> Node -> Int32 -> Int32 -> Int32
+addNode :: Int64 -> Maybe Int64 -> Text -> Jv1.Node -> Int32 -> Int32 -> Int32
       -> Tx.Transaction (Either String Int64)
 addNode convUid parentUid eidNode node seqNode seqChild seqPre =
   fmap (fmap fst) $ addNodeR convUid parentUid eidNode node seqNode seqChild seqPre
 
 
-addNodeR :: Int64 -> Maybe Int64 -> Text -> Node -> Int32 -> Int32 -> Int32
+addNodeR :: Int64 -> Maybe Int64 -> Text -> Jv1.Node -> Int32 -> Int32 -> Int32
       -> Tx.Transaction (Either String (Int64, StatRawAdd))
 addNodeR convUid parentUid eidNode node seqNode seqChild seqPre = do
   nodeUid <- Tx.statement
@@ -215,7 +217,7 @@ renderNodeIssue eidNode eidMsg issue =
       <> ", error: " <> T.pack (renderIssueC issue)
 
 
-renderConversationErr :: Conversation -> String -> String
+renderConversationErr :: Jv1.Conversation -> String -> String
 renderConversationErr conversation err =
   T.unpack $
     "@[addConversation] insert failed, title: " <> conversation.titleCv

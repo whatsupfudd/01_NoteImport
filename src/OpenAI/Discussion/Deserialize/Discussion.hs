@@ -3,7 +3,7 @@
 -- This module defines DB-optimised in-memory types carrying stable DB identities
 -- (uid + uuid) and convenient indexes for later modifications.
 --
-module OpenAI.Deserialize.Discussion where
+module OpenAI.Discussion.Deserialize.Discussion where
 
 import Control.Monad (forM)
 
@@ -28,7 +28,7 @@ import qualified Hasql.Session as Ses
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
-import qualified OpenAI.Deserialize.DiscussionStmt as St
+import qualified OpenAI.Discussion.Deserialize.DiscussionStmt as St
 
 
 -- -----------------------------

@@ -7,6 +7,8 @@ module OpenAI.Import.Lookup
 
 import Data.Int (Int64)
 import Data.Map.Strict (Map)
+import Data.Maybe (fromMaybe)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Map.Strict as Mp
 import qualified Data.Vector as V
@@ -14,15 +16,16 @@ import qualified Data.Vector as V
 import qualified Hasql.Pool as Hp
 import qualified Hasql.Session as Hs
 
-import qualified OpenAI.Deserialize.ConversationStmt as Dcs
+import qualified OpenAI.Conversation.Deserialize.ConversationStmt as Dcs
+import OpenAI.Utils (safeScientific)
 
 
 data RowConv = RowConv {
     uidConv :: Int64
   , eidConv :: Text
   , titleConv :: Text
-  , timeCreateCv :: Double
-  , timeUpdateCv :: Double
+  , timeCreateCv :: Scientific
+  , timeUpdateCv :: Scientific
   }
   deriving (Eq, Show)
 
@@ -43,8 +46,8 @@ rowConvFromRow (uidA, eidA, titleA, timeCreateA, timeUpdateA) =
     { uidConv = uidA
     , eidConv = eidA
     , titleConv = titleA
-    , timeCreateCv = timeCreateA
-    , timeUpdateCv = timeUpdateA
+    , timeCreateCv = fromMaybe 0 $ safeScientific timeCreateA
+    , timeUpdateCv = fromMaybe 0 $ safeScientific timeUpdateA
     }
 
 

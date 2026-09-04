@@ -113,10 +113,9 @@ commandDefs =
     headArray = head cmdArray
     tailArray = tail cmdArray
   in
-    foldl (\accum aCmd -> cmdBuilder aCmd <> accum) (cmdBuilder headArray) tailArray
+  foldl (\accum aCmd -> cmdBuilder aCmd <> accum) (cmdBuilder headArray) tailArray
   where
-    cmdBuilder (label, cmdDef, desc) =
-      command label (info cmdDef (progDesc desc))
+  cmdBuilder (label, cmdDef, desc) = command label (info cmdDef (progDesc desc))
 
 notionOpts :: Parser Command
 notionOpts =
@@ -213,6 +212,7 @@ oaiStoreOpts =
     <*> switch (long "summarise" <> short 's' <> help "Perform summarisation of the conversations." <> showDefault)
     <*> switch (long "dry-run" <> short 'd' <> help "Perform a dry run." <> showDefault)
     <*> strArgument (metavar "JSONFILE" <> help "JSON file file path")
+    <*> many (strOption (long "follow" <> short 'f' <> help "Follow JSON file file path" <> metavar "FOLLOWFILE"))
 
 
 oaiTargetsOpts :: Parser TargetsOpts

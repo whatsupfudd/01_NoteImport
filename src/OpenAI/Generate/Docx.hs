@@ -35,7 +35,7 @@ import Network.HTTP.Client
 import Network.HTTP.Types.Header (hContentType)
 
 
-import OpenAI.Parse
+import qualified OpenAI.Conversation.Process as Cp
 import OpenAI.Types
 import OpenAI.Generate.DocxGeneral
 
@@ -191,7 +191,7 @@ subActionsBlocks sas = fmap concat $ forM sas $ \case
           case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 cc.textCC) :: Either String OaiCodeJson of
             Left err -> pure [
               P.Header 3 P.nullAttr [P.Str "CodeSA"]
-              , P.Para [P.Str (cc.languageCC <> " err: " <> sanitizeText (T.pack err))]
+              , P.Para [P.Str (cc.languageCC <> " err: " <> Cp.sanitizeText (T.pack err))]
               ]
             Right jsonBlock -> do
               body <- parseMarkdownBlocks jsonBlock.contentOJ

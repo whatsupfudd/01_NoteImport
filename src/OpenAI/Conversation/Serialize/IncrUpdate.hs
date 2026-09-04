@@ -1,5 +1,6 @@
-module OpenAI.Serialize.IncrUpdate (ReportRaw(..), updateConversation, incrUpdateConversation) where
+module OpenAI.Conversation.Serialize.IncrUpdate (ReportRaw(..), updateConversation, incrUpdateConversation, currentToV1) where
 
+import qualified Data.Map.Strict as Mp
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -15,8 +16,10 @@ import qualified OpenAI.Delta.Snap.Db as SnapDb
 import qualified OpenAI.Delta.Snap.Json as SnapJson
 import OpenAI.Delta.Types (Conflict)
 import qualified OpenAI.Delta.Validate as Validate
-import qualified OpenAI.Deserialize.ConversationStmt as ConvStmt
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Deserialize.ConversationStmt as ConvStmt
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+
 
 
 -- | Reconcile an existing raw OpenAI conversation with its JSON
@@ -51,13 +54,15 @@ incrUpdateConversation = updateConversation
 
 updateTx :: Jd.Conversation -> Text -> Htx.Transaction (Either Text ReportRaw)
 updateTx conversation sourceKey = do
-  lockedConv <- Htx.statement conversation.convIdCv ConvStmt.selectConversationForUpdate
+  lockedConv <- Htx.statement conversation.oaiIdCv ConvStmt.selectConversationForUpdate
   case lockedConv of
-    Nothing -> pure . Left $ "conversation not found: " <> conversation.convIdCv
+    Nothing -> pure . Left $ "conversation not found: " <> conversation.oaiIdCv
     Just (uidConv, _, _) -> do
       dbSnapRez <- SnapDb.load uidConv
       let
-        jsonSnapRez = SnapJson.build conversation
+        -- TODO: fix
+        fakeV1 = currentToV1 conversation
+        jsonSnapRez = SnapJson.build fakeV1
       case (dbSnapRez, jsonSnapRez) of
         (Left conflicts, _) -> pure . Left $ renderConflicts "database snapshot" conflicts
         (_, Left conflicts) -> pure . Left $ renderConflicts "JSON snapshot" conflicts
@@ -68,13 +73,23 @@ updateTx conversation sourceKey = do
               case Validate.check plannedDelta of
                 Left conflicts -> pure . Left $ renderConflicts "delta validation" conflicts
                 Right delta -> do
-                  applyRez <- Apply.apply sourceKey conversation jsonSnap delta
+                  -- TODO: fix
+                  applyRez <- Apply.apply sourceKey fakeV1 jsonSnap delta
                   case applyRez of
                     Left conflicts -> do
                       Htx.condemn
                       pure . Left $ renderConflicts "delta application" conflicts
                     Right applyResult -> pure . Right $ Report.fromApply delta applyResult
 
+
+currentToV1 :: Jd.Conversation -> Jv1.Conversation
+currentToV1 conv = Jv1.Conversation {
+  Jv1.convIdCv = conv.oaiIdCv
+  , Jv1.titleCv = conv.titleCv
+  , Jv1.createTimeCv = conv.createTimeCv
+  , Jv1.updateTimeCv = conv.updateTimeCv
+  , Jv1.mappingCv = Mp.empty
+}
 
 renderConflicts :: Text -> [Conflict] -> Text
 renderConflicts stage conflicts =

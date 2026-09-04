@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Deserialize.ContentStmt where
+module OpenAI.Conversation.Deserialize.ContentStmt where
 
 import Data.Aeson (Value)
 import Data.Int (Int32, Int64)
@@ -25,9 +25,9 @@ type ThoughtRaw = (Text, Text, Value, Bool)
 type OtherRaw = Value
 type TextPartRaw = Text
 type AudioTransRaw = (Text, Text, Maybe Text)
-type AudioAssetRaw = (Int64, Maybe Value, Text, Int64, Text, Maybe Text)
+type AudioAssetRaw = (Int64, Maybe Double, Text, Int64, Text, Maybe Text)
 type ImageAssetRaw = (Int64, Text, Int64, Int32, Int32, Maybe Value)
-type RealtimeAvRaw = (Int64, Maybe Value, Value, Maybe Value, Maybe Double)
+type RealtimeAvRaw = (Int64, Maybe Double, Value, Maybe Value, Maybe Double)
 
 type ImageMetaRaw = ( Int64, Maybe Value, Maybe Int32, Maybe Int32
   , Maybe Value, Maybe Value, Maybe Value, Maybe Value
@@ -35,7 +35,7 @@ type ImageMetaRaw = ( Int64, Maybe Value, Maybe Int32, Maybe Int32
   , Maybe Value, Maybe Value, Maybe Value
   )
 
-type AudioMetaRaw = ( Maybe Value, Maybe Value, Maybe Value, Maybe Value
+type AudioMetaRaw = ( Maybe Double, Maybe Double, Maybe Value, Maybe Value
   , Maybe Value, Maybe Value, Maybe Value
   , Double, Double
   )
@@ -218,7 +218,7 @@ selectAudioAssetPart =
   [TH.maybeStatement|
     select
       p.uid :: int8,
-      p.expiry_datetime :: jsonb?,
+      p.expiry_datetime :: float8?,
       p.asset_pointer :: text,
       p.size_bytes :: int8,
       p.format :: text,
@@ -248,7 +248,7 @@ selectRealtimeAvPart =
   [TH.maybeStatement|
     select
       p.uid :: int8,
-      p.expiry_datetime :: jsonb?,
+      p.expiry_datetime :: float8?,
       p.frames_asset_pointers :: jsonb,
       p.video_container_asset_pointer :: jsonb?,
       p.audio_start_timestamp :: float8?
@@ -282,8 +282,8 @@ selectAudioMeta :: Statement Int64 (Maybe AudioMetaRaw)
 selectAudioMeta =
   [TH.maybeStatement|
     select
-      m.start_timestamp :: jsonb?,
-      m.end_timestamp :: jsonb?,
+      m.start_timestamp :: float8?,
+      m.end_timestamp :: float8?,
       m.pretokenized_vq :: jsonb?,
       m.interruptions :: jsonb?,
       m.original_audio_source :: jsonb?,

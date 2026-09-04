@@ -2,6 +2,7 @@ module OpenAI.Generate.DocxGeneral where
 
 import Data.Default (def)
 import Data.List (foldl')
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, defaultTimeLocale, formatTime)
@@ -166,7 +167,7 @@ renderTiming (Timing c u) =
     (Nothing, Just ut) -> "(upd) " <> renderEpoch ut
     _ -> "(no timestamp)"
 
-renderEpoch :: Double -> Text
+renderEpoch :: Scientific -> Text
 renderEpoch secs =
   let utc :: UTCTime
       utc = posixSecondsToUTCTime (realToFrac secs)

@@ -15,6 +15,7 @@ module OpenAI.Import.Types
   ) where
 
 import Data.Int (Int64)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 
 data Mode
@@ -68,13 +69,13 @@ data ConvState
       { uidConv :: Int64
       , eidConv :: Text
       , titleDb :: Text
-      , timeUpdateDb :: Double
+      , timeUpdateDb :: Scientific
       }
   | OlderCS
       { uidConv :: Int64
       , eidConv :: Text
-      , timeUpdateDb :: Double
-      , timeUpdateJs :: Double
+      , timeUpdateDb :: Scientific
+      , timeUpdateJs :: Scientific
       }
   | BrokenCS
       { eidConv :: Text

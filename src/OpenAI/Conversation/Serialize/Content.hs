@@ -1,21 +1,24 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Serialize.Content (
+module OpenAI.Conversation.Serialize.Content (
     insertMsgTree, insertContentTree, rewriteMsgTree
   ) where
 
 import Control.Monad (forM_, void)
 import Data.Int (Int32, Int64)
 import Data.Maybe (fromMaybe)
+import Data.Scientific (Scientific, toRealFloat)
 import Data.Text (Text)
-import qualified Data.Aeson as Ae
 import qualified Data.Vector as V
+
+import qualified Data.Aeson as Ae
+
 import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 import qualified Hasql.Transaction as Tx
 
-import qualified OpenAI.Json.Reader as Jd
-import qualified OpenAI.Serialize.ContentStmt as St
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Serialize.ContentStmt as St
 
 
 insertMsgTree :: Int64 -> Jd.Message -> Tx.Transaction (Either Text Int64)
@@ -23,11 +26,11 @@ insertMsgTree uidNode message = do
   uidMsg <- Tx.statement
     ( uidNode
     , message.idMsg
-    , message.createTimeMsg
-    , message.updateTimeMsg
+    , Just $ toRealFloat message.createTimeMsg
+    , toRealFloat <$> message.updateTimeMsg
     , message.statusMsg
     , message.endTurnMsg
-    , message.weightMsg
+    , toRealFloat message.weightMsg
     , Ae.toJSON message.metadataMsg
     , message.recipientMsg
     , message.channelMsg
@@ -52,11 +55,11 @@ rewriteMsgTree uidMsg message = do
   Tx.statement uidMsg deleteContentsByMsg
 
   Tx.statement
-    ( message.createTimeMsg
-    , message.updateTimeMsg
+    ( Just $ toRealFloat message.createTimeMsg
+    , toRealFloat <$> message.updateTimeMsg
     , message.statusMsg
     , message.endTurnMsg
-    , message.weightMsg
+    , toRealFloat message.weightMsg
     , Ae.toJSON message.metadataMsg
     , message.recipientMsg
     , message.channelMsg
@@ -93,61 +96,61 @@ insertContentTree uidMsg seqContent content = do
     St.insertContent
 
   case content of
-    Jd.CodeCT language formatName codeText ->
+    Jd.CodeCT code ->
       Tx.statement
-        (uidContent, language, formatName, codeText)
+        (uidContent, code.languageCP, code.responseFormatNameCP, code.textCP)
         St.insertCodeContent
 
-    Jd.ExecutionOutputCT outputText ->
+    Jd.ExecutionOutputCT execOut ->
       Tx.statement
-        (uidContent, outputText)
+        (uidContent, execOut.textEO)
         St.insertExecutionOutputContent
 
-    Jd.MultimodalTextCT parts ->
-      forM_ (zip ([0 ..] :: [Int32]) parts) $ \(seqPart, part) ->
+    Jd.MultimodalTextCT mmt ->
+      forM_ (zip ([0 ..] :: [Int32]) mmt.partsMmt) $ \(seqPart, part) ->
         insertMultiModalPartTree uidContent seqPart part
 
-    Jd.ModelEditableContextCT modelSetContext repository repoSummary structuredContext ->
+    Jd.ModelEditableContextCT modelCtx ->
       Tx.statement
-        (uidContent, modelSetContext, repository, repoSummary, structuredContext)
+        (uidContent, modelCtx.modelSetMEC, modelCtx.repositoryMEC, modelCtx.repoSummaryMEC, modelCtx.structuredMEC)
         St.insertModelEditableContextContent
 
-    Jd.ReasoningRecapCT reasoningText ->
+    Jd.ReasoningRecapCT recap ->
       Tx.statement
-        (uidContent, reasoningText)
+        (uidContent, recap.contentRR)
         St.insertReasoningRecapContent
 
-    Jd.SystemErrorCT errorName errorText ->
+    Jd.SystemErrorCT sysErr ->
       Tx.statement
-        (uidContent, errorName, errorText)
+        (uidContent, sysErr.nameSER, sysErr.textSER)
         St.insertSystemErrorContent
 
-    Jd.TetherBrowsingDisplayCT result summary assets tetherId ->
+    Jd.TetherBrowsingDisplayCT tbDisplay ->
       Tx.statement
-        (uidContent, result, Ae.toJSON <$> summary, Ae.toJSON <$> assets, tetherId)
+        (uidContent, tbDisplay.resultTbd, Ae.toJSON <$> tbDisplay.summaryTbd, Ae.toJSON <$> tbDisplay.assetsTbd, tbDisplay.tetherIDTbd)
         St.insertTetherBrowsingDisplayContent
 
-    Jd.TetherQuoteCT url domain quoteText title tetherId ->
+    Jd.TetherQuoteCT tq ->
       Tx.statement
-        (uidContent, url, domain, quoteText, title, tetherId)
+        (uidContent, tq.urlTq, tq.domainTq, tq.textTq, tq.titleTq, tq.tetherIDTq)
         St.insertTetherQuoteContent
 
-    Jd.TextCT parts ->
+    Jd.TextCT text ->
       Tx.statement
-        (uidContent, V.fromList parts)
+        (uidContent, V.fromList text.partsTP)
         St.insertTextContent
 
-    Jd.ThoughtsCT thoughts sourceAnalysisMsgId -> do
+    Jd.ThoughtsCT thoughts -> do -- thoughts sourceAnalysisMsgId
       Tx.statement
-        (uidContent, sourceAnalysisMsgId)
+        (uidContent, thoughts.sourceAnalysisMsgIdTP)
         St.insertThoughtsContent
 
-      forM_ (zip ([0 ..] :: [Int32]) thoughts) $ \(seqThought, thought) ->
+      forM_ (zip ([0 ..] :: [Int32]) thoughts.thoughtsTP) $ \(seqThought, thought) ->
         insertThoughtTree uidContent seqThought thought
 
-    Jd.OtherCT kind raw ->
+    Jd.OtherCT info ->
       Tx.statement
-        (uidContent, Ae.toJSON raw)
+        (uidContent, Ae.toJSON info.rawOpl)
         St.insertUnknownContent
 
   pure $ Right uidContent
@@ -166,17 +169,17 @@ contentKind content =
     Jd.TetherQuoteCT {} -> "tether_quote"
     Jd.TextCT {} -> "text"
     Jd.ThoughtsCT {} -> "thoughts"
-    Jd.OtherCT kind _ -> kind
+    Jd.OtherCT info -> info.contentTypeOpl
 
 
-insertThoughtTree :: Int64 -> Int32 -> Jd.Thought -> Tx.Transaction ()
+insertThoughtTree :: Int64 -> Int32 -> Jd.ThoughtContent -> Tx.Transaction ()
 insertThoughtTree uidContent seqThought thought =
   Tx.statement
     ( uidContent
-    , thought.summaryTh
-    , thought.contentTh
-    , Ae.toJSON thought.chunksTh
-    , fromMaybe False thought.finishedTh
+    , thought.summaryTC
+    , thought.contentTC
+    , Ae.toJSON thought.chunksTC
+    , thought.finishedTC
     , seqThought
     )
     St.insertThought
@@ -189,43 +192,43 @@ insertMultiModalPartTree uidContent seqPart part = do
     St.insertMultiModalPart
 
   case part of
-    Jd.TextPT partText ->
+    Jd.TextPT text ->
       Tx.statement
-        (uidPart, partText)
+        (uidPart, text)
         St.insertTextMMPart
 
-    Jd.AudioTranscriptionPT partText direction decodingId ->
+    Jd.AudioTranscriptionPT audioTrans ->
       Tx.statement
-        (uidPart, partText, direction, decodingId)
+        (uidPart, audioTrans.textAtp, audioTrans.directionAtp, audioTrans.decodingIdAtp)
         St.insertAudioTranscriptionMMPart
 
-    Jd.AudioAssetPointerPT pointer ->
-      void $ insertAudioAssetTree uidPart pointer
+    Jd.AudioAssetPointerPT audioPtr ->
+      void $ insertAudioAssetTree uidPart audioPtr
 
-    Jd.ImageAssetPointerPT assetPointer sizeBytes width height fovea metadata -> do
+    Jd.ImageAssetPointerPT imgPtr -> do -- assetPointer sizeBytes width height fovea metadata
       uidPointer <- Tx.statement
         ( uidPart
-        , assetPointer
-        , fromIntegral sizeBytes
-        , fromIntegral width
-        , fromIntegral height
-        , fovea
+        , imgPtr.assetPointerPap
+        , fromIntegral imgPtr.sizeBytesPap
+        , fromIntegral imgPtr.widthPap
+        , fromIntegral imgPtr.heightPap
+        , imgPtr.foveaPap
         )
         St.insertImageAssetPointerMMPart
 
-      forM_ metadata $ insertImageMetadataTree uidPointer
+      forM_ imgPtr.metadataPap $ insertImageMetadataTree uidPointer
 
-    Jd.RealTimeUserAVPT expiryDatetime framesAssetPointers videoAssetPointer audioPointer audioStartTimestamp -> do
+    Jd.RealTimeUserAVPT rtUser -> do -- expiryDatetime framesAssetPointers videoAssetPointer audioPointer audioStartTimestamp
       void $ Tx.statement
         ( uidPart
-        , expiryDatetime
-        , Just $ Ae.toJSON framesAssetPointers
-        , videoAssetPointer
-        , audioStartTimestamp
+        , toRealFloat <$> rtUser.expiryDatetimeRtuav
+        , Just $ Ae.toJSON rtUser.framesApRtuav
+        , rtUser.videoContainerApRtuav
+        , toRealFloat <$> rtUser.audioStartTimestampRtuav
         )
         St.insertRealTimeUserAVMMPart
 
-      void $ insertAudioAssetTree uidPart audioPointer
+      void $ insertAudioAssetTree uidPart rtUser.audioApRtuav
 
 
 multiModalPartKind :: Jd.MultiModalPart -> Text
@@ -295,7 +298,7 @@ insertAudioAssetTree :: Int64 -> Jd.AudioAssetPointer -> Tx.Transaction Int64
 insertAudioAssetTree uidPart pointer = do
   uidPointer <- Tx.statement
     ( uidPart
-    , pointer.expiryDatetimeAap
+    , toRealFloat <$> pointer.expiryDatetimeAap
     , pointer.assetPointerAap
     , fromIntegral pointer.sizeBytesAap
     , pointer.formatAap
@@ -312,15 +315,15 @@ insertAudioMetadataTree uidPointer metadata =
   Tx.statement
     ( uidPointer
     , 0
-    , metadata.startTimestampAm
-    , metadata.endTimestampAm
+    , toRealFloat <$> metadata.startTimestampAm
+    , toRealFloat <$> metadata.endTimestampAm
     , metadata.pretokenizedVqAm
     , metadata.interruptionsAm
     , metadata.originalAudioSourceAm
     , metadata.transcriptionAm
     , metadata.wordTranscriptionAm
-    , metadata.startAm
-    , metadata.endAm
+    , toRealFloat metadata.startAm
+    , toRealFloat metadata.endAm
     )
     St.insertAudioMetadata
 

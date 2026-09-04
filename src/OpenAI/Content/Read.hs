@@ -5,6 +5,8 @@ import Control.Monad (forM)
 import Data.Either (partitionEithers)
 import Data.Int (Int32, Int64)
 import Data.List (sortOn)
+import Data.Maybe (fromMaybe)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -18,8 +20,9 @@ import qualified Hasql.Transaction as Tx
 import OpenAI.Content.Kind (KindPart(..))
 import qualified OpenAI.Content.Kind as Ck
 import qualified OpenAI.Content.Types as Ctp
-import qualified OpenAI.Deserialize.ContentStmt as Cs
-import qualified OpenAI.Deserialize.ConversationStmt as StC
+import qualified OpenAI.Conversation.Deserialize.ContentStmt as Cs
+import qualified OpenAI.Conversation.Deserialize.ConversationStmt as StC
+import qualified OpenAI.Utils as Ut
 
 
 loadByMsg :: Int64 -> Tx.Transaction (Either [Ctp.IssueC] [(Int32, Ctp.Payload)])
@@ -227,7 +230,7 @@ loadAudioByUid uidAudio = do
 loadAudioPtrRow :: Cs.AudioAssetRaw -> Tx.Transaction Ctp.AudioPtr
 loadAudioPtrRow (uid, expiry, asset, size, format, direction) = do
   mbMeta <- Tx.statement uid Cs.selectAudioMeta
-  pure $ Ctp.AudioPtr expiry asset size format direction
+  pure $ Ctp.AudioPtr (Ut.safeScientific =<< expiry) asset size format direction
       (audioMetaFromRow <$> mbMeta)
 
 
@@ -299,11 +302,11 @@ loadRealtimePart uidPart = do
               Ctp.RealtimeAvPP {
                   ptrAv =
                     Ctp.AvPtr
-                      (expiryRealtimeRow row)
+                      (Ut.safeScientific =<< expiryRealtimeRow row)
                       [framesRealtimeRow row]
                       (videoRealtimeRow row)
                       audio
-                      (startAudioRealtimeRow row)
+                      (Ut.safeScientific =<< startAudioRealtimeRow row)
                 }
 
 
@@ -327,15 +330,15 @@ thoughtFromRow (summary, content, chunks, finished) =
 audioMetaFromRow :: Cs.AudioMetaRaw -> Ctp.AudioMeta
 audioMetaFromRow (startTimestamp, endTimestamp, pretokenized, interruptions, source, transcription, wordTranscription, start, end) =
   Ctp.AudioMeta
-    startTimestamp
-    endTimestamp
+    (Ut.safeScientific =<< startTimestamp)
+    (Ut.safeScientific =<< endTimestamp)
     pretokenized
     interruptions
     source
     transcription
     wordTranscription
-    start
-    end
+    (fromMaybe 0 $ Ut.safeScientific start)
+    (fromMaybe 0 $ Ut.safeScientific end)
 
 
 dalleFromRow :: Cs.DalleRaw -> Ctp.DalleMeta
@@ -435,7 +438,7 @@ uidAudioRow :: Cs.AudioAssetRaw -> Int64
 uidAudioRow (uid, _, _, _, _, _) = uid
 
 
-expiryAudioRow :: Cs.AudioAssetRaw -> Maybe Ae.Value
+expiryAudioRow :: Cs.AudioAssetRaw -> Maybe Double
 expiryAudioRow (_, expiry, _, _, _, _) = expiry
 
 
@@ -531,7 +534,7 @@ uidAudioRealtimeRow :: Cs.RealtimeAvRaw -> Int64
 uidAudioRealtimeRow (uidAudio, _, _, _, _) = uidAudio
 
 
-expiryRealtimeRow :: Cs.RealtimeAvRaw -> Maybe Ae.Value
+expiryRealtimeRow :: Cs.RealtimeAvRaw -> Maybe Double
 expiryRealtimeRow (_, expiry, _, _, _) = expiry
 
 
@@ -547,11 +550,11 @@ startAudioRealtimeRow :: Cs.RealtimeAvRaw -> Maybe Double
 startAudioRealtimeRow (_, _, _, _, startAudio) = startAudio
 
 
-startTimestampAudioMetaRow :: Cs.AudioMetaRaw -> Maybe Ae.Value
+startTimestampAudioMetaRow :: Cs.AudioMetaRaw -> Maybe Double
 startTimestampAudioMetaRow (value, _, _, _, _, _, _, _, _) = value
 
 
-endTimestampAudioMetaRow :: Cs.AudioMetaRaw -> Maybe Ae.Value
+endTimestampAudioMetaRow :: Cs.AudioMetaRaw -> Maybe Double
 endTimestampAudioMetaRow (_, value, _, _, _, _, _, _, _) = value
 
 

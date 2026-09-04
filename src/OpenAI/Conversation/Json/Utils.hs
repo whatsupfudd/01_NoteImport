@@ -1,4 +1,4 @@
-module OpenAI.Json.Utils where
+module OpenAI.Conversation.Json.Utils where
 
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Mp

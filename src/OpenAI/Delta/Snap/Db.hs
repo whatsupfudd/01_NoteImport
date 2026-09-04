@@ -4,8 +4,10 @@ import Data.Int (Int32, Int64)
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Mp
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as St
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Vector (Vector)
@@ -20,7 +22,8 @@ import qualified OpenAI.Delta.Hash as Dh
 import qualified OpenAI.Delta.Snap as Snap
 import OpenAI.Delta.Snap (ConvSnap)
 import OpenAI.Delta.Types (Conflict(..))
-import qualified OpenAI.Deserialize.ConversationStmt as Dst
+import qualified OpenAI.Conversation.Deserialize.ConversationStmt as Dst
+import qualified OpenAI.Utils as Ut
 
 
 data RowsDb = RowsDb {
@@ -148,8 +151,8 @@ buildConversation (uidConv, eidConv, titleConv, timeCreate, timeUpdate) rows = d
           eidConv = eidConv
           , uidConv = Just uidConv
           , titleConv = titleConv
-          , timeCreateCv = timeCreate
-          , timeUpdateCv = timeUpdate
+          , timeCreateCv = fromMaybe 0 $ Ut.safeScientific timeCreate
+          , timeUpdateCv = fromMaybe 0 $ Ut.safeScientific timeUpdate
           , nodes = nodes
         }
 
@@ -179,11 +182,11 @@ buildMessage row@(uidMsg, uidNode, eidMsg, timeCreate, timeUpdate, status, endTu
         msgSnap = Snap.MsgSnap {
             eidMsg = eidMsg
             , uidMsg = Just uidMsg
-            , timeCreate = timeCreate
-            , timeUpdate = timeUpdate
+            , timeCreate = Ut.safeScientific =<< timeCreate
+            , timeUpdate = Ut.safeScientific =<< timeUpdate
             , status = status
             , endTurn = endTurn
-            , weight = weight
+            , weight = fromMaybe 0 $ Ut.safeScientific weight
             , metadata = metadata
             , recipient = recipient
             , channel = channel

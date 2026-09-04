@@ -1,4 +1,4 @@
-module OpenAI.Serialize.DiscussionIncr
+module OpenAI.Discussion.Serialize.DiscussionIncr
   ( upsertDiscussionFromConversation
   , computeDiscussionDelta
   , applyDiscussionDelta
@@ -10,8 +10,8 @@ import Data.Int (Int64)
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
-import qualified OpenAI.Deserialize.Discussion as Dd
-import qualified OpenAI.Serialize.Discussion as Sd
+import qualified OpenAI.Discussion.Deserialize.Discussion as Dd
+import qualified OpenAI.Discussion.Serialize.Discussion as Sd
 
 -- TODO:
 upsertDiscussionFromConversation :: Int64 -> Dd.DiscussionDb -> Tx.Transaction (Either String ())

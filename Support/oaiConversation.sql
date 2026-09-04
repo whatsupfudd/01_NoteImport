@@ -236,7 +236,7 @@ create table audio_transcription_mmpart (
 create table audio_asset_pointer_mmpart (
   uid BIGSERIAL PRIMARY KEY,
   mmpart_fk bigint references multimodal_parts(uid),
-  expiry_datetime JSONB,
+  expiry_datetime double precision,
   asset_pointer TEXT NOT NULL,
   size_bytes BIGINT NOT NULL,
   format TEXT NOT NULL,
@@ -257,8 +257,8 @@ create table real_time_user_av_mmpart (
 CREATE TABLE IF NOT EXISTS metadatas_audioasset (
   assetptr_fk bigint
   , part_kind int not null    -- 1: audio_asset_pointer_mmpart, 2: real_time_user_av_mmpart
-  , start_timestamp JSONB
-  , end_timestamp JSONB
+  , start_timestamp double precision
+  , end_timestamp double precision
   , pretokenized_vq JSONB
   , interruptions JSONB
   , original_audio_source JSONB

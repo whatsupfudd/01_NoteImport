@@ -13,79 +13,79 @@ import qualified Data.Aeson.Key as Ak
 import qualified Data.Aeson.KeyMap as Km
 
 import qualified OpenAI.Content.Types as Ct
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Json.Schema as Jd
 
 
 fromJson :: Jd.Content -> Either Ct.IssueC Ct.Payload
 fromJson = \case
-  Jd.CodeCT lang formatName text ->
-    Right $ Ct.CodePL lang formatName text
+  Jd.CodeCT cBlock -> -- lang formatName text
+    Right $ Ct.CodePL cBlock.languageCP cBlock.responseFormatNameCP cBlock.textCP
 
-  Jd.ExecutionOutputCT text ->
-    Right $ Ct.ExecOutPL text
+  Jd.ExecutionOutputCT execOut ->
+    Right $ Ct.ExecOutPL execOut.textEO
 
-  Jd.ModelEditableContextCT modelSlug repository repoSummary structuredContext ->
-    Right $ Ct.ModelCtxPL modelSlug repository repoSummary structuredContext
+  Jd.ModelEditableContextCT modCtx -> -- modelSlug repository repoSummary structuredContext
+    Right $ Ct.ModelCtxPL modCtx.modelSetMEC modCtx.repositoryMEC modCtx.repoSummaryMEC modCtx.structuredMEC
 
-  Jd.MultimodalTextCT parts ->
-    Ct.MultiPL <$> traverse fromPartJson parts
+  Jd.MultimodalTextCT mmTxt ->
+    Ct.MultiPL <$> traverse fromPartJson mmTxt.partsMmt
 
-  Jd.ReasoningRecapCT text ->
-    Right $ Ct.ReasoningPL text
+  Jd.ReasoningRecapCT recap ->
+    Right $ Ct.ReasoningPL recap.contentRR
 
-  Jd.SystemErrorCT name text ->
-    Right $ Ct.SystemErrPL name text
+  Jd.SystemErrorCT sysErr -> -- name text
+    Right $ Ct.SystemErrPL sysErr.nameSER sysErr.textSER
 
-  Jd.TetherBrowsingDisplayCT results summary assets tetherId ->
-    Right $ Ct.TetherBrowsePL results summary (Ae.toJSON <$> assets) tetherId
+  Jd.TetherBrowsingDisplayCT tbDisplay -> -- results summary assets tetherId
+    Right $ Ct.TetherBrowsePL tbDisplay.resultTbd tbDisplay.summaryTbd (Ae.toJSON <$> tbDisplay.assetsTbd) tbDisplay.tetherIDTbd
 
-  Jd.TetherQuoteCT url domain text title tetherId ->
-    Right $ Ct.TetherQuotePL url domain text title tetherId
+  Jd.TetherQuoteCT tq -> -- url domain text title tetherId
+    Right $ Ct.TetherQuotePL tq.urlTq tq.domainTq tq.textTq tq.titleTq tq.tetherIDTq
 
-  Jd.TextCT parts ->
-    Right $ Ct.TextPL parts
+  Jd.TextCT txt ->
+    Right $ Ct.TextPL txt.partsTP
 
-  Jd.ThoughtsCT thoughts sourceId ->
-    Right $ Ct.ThoughtsPL sourceId $ map fromThoughtJson thoughts
+  Jd.ThoughtsCT thoughts -> -- thoughts sourceId
+    Right . Ct.ThoughtsPL thoughts.sourceAnalysisMsgIdTP $ map fromThoughtJson thoughts.thoughtsTP
 
-  Jd.OtherCT kind raw ->
-    Right $ Ct.OtherPL kind $ Ae.toJSON raw
+  Jd.OtherCT info ->
+    Right $ Ct.OtherPL info.contentTypeOpl $ Ae.toJSON info.rawOpl
 
 
 toJsonApprox :: Ct.Payload -> Jd.Content
 toJsonApprox = \case
   Ct.CodePL lang formatName text ->
-    Jd.CodeCT lang formatName text
+    Jd.CodeCT $ Jd.CodePL lang formatName text
 
   Ct.ExecOutPL text ->
-    Jd.ExecutionOutputCT text
+    Jd.ExecutionOutputCT $ Jd.ExecutionOutputPL text
 
   Ct.ModelCtxPL modelSlug repository repoSummary structuredContext ->
-    Jd.ModelEditableContextCT modelSlug repository repoSummary structuredContext
+    Jd.ModelEditableContextCT $ Jd.ModelEditableContextPL modelSlug repository repoSummary structuredContext
 
   Ct.MultiPL parts ->
-    Jd.MultimodalTextCT $ map partToJsonApprox parts
+    Jd.MultimodalTextCT . Jd.MultimodalTextPL $ map partToJsonApprox parts
 
   Ct.ReasoningPL text ->
-    Jd.ReasoningRecapCT text
+    Jd.ReasoningRecapCT $ Jd.ReasoningRecapPL text
 
   Ct.SystemErrPL name text ->
-    Jd.SystemErrorCT name text
+    Jd.SystemErrorCT $ Jd.SystemErrorPL name text
 
   Ct.TetherBrowsePL results summary assets tetherId ->
-    Jd.TetherBrowsingDisplayCT results summary (assetsFromValue assets) tetherId
+    Jd.TetherBrowsingDisplayCT $ Jd.TetherBrowsingDisplayPL results summary (assetsFromValue assets) tetherId
 
   Ct.TetherQuotePL url domain text title tetherId ->
-    Jd.TetherQuoteCT url domain text title tetherId
+    Jd.TetherQuoteCT $ Jd.TetherQuotePL url domain text title tetherId
 
   Ct.TextPL parts ->
-    Jd.TextCT parts
+    Jd.TextCT $ Jd.TextPL parts
 
   Ct.ThoughtsPL sourceId thoughts ->
-    Jd.ThoughtsCT (map thoughtToJsonApprox thoughts) sourceId
+    Jd.ThoughtsCT $ Jd.ThoughtsPL (map thoughtToJsonApprox thoughts) sourceId
 
   Ct.OtherPL kind raw ->
-    Jd.OtherCT kind $ objectMap raw
+    Jd.OtherCT $ Jd.OtherPL kind (objectMap raw)
 
 
 valuePayload :: Ct.Payload -> Ae.Value
@@ -208,40 +208,38 @@ valuePart = \case
 
 fromPartJson :: Jd.MultiModalPart -> Either Ct.IssueC Ct.PartPL
 fromPartJson = \case
-  Jd.TextPT text ->
-    Right $ Ct.TextPP text
+  Jd.TextPT txt ->
+    Right $ Ct.TextPP txt
 
-  Jd.AudioTranscriptionPT text direction decodingId ->
-    Right $ Ct.AudioTransPP text direction decodingId
+  Jd.AudioTranscriptionPT audioTr -> -- text direction decodingId
+    Right $ Ct.AudioTransPP audioTr.textAtp audioTr.directionAtp audioTr.decodingIdAtp
 
   Jd.AudioAssetPointerPT ptr ->
     Right $ Ct.AudioAssetPP $ fromAudioPtrJson ptr
 
-  Jd.ImageAssetPointerPT asset size width height fovea metadata ->
+  Jd.ImageAssetPointerPT imgPtr -> -- asset size width height fovea metadata
     Right $ Ct.ImageAssetPP $
-      Ct.ImagePtr asset (fromIntegral size) (fromIntegral width) (fromIntegral height) fovea (fromImageMetaJson <$> metadata)
+      Ct.ImagePtr imgPtr.assetPointerPap (fromIntegral imgPtr.sizeBytesPap) (fromIntegral imgPtr.widthPap) (fromIntegral imgPtr.heightPap) imgPtr.foveaPap (fromImageMetaJson <$> imgPtr.metadataPap)
 
-  Jd.RealTimeUserAVPT expiry frames video audio start ->
-    Right $ Ct.RealtimeAvPP $ Ct.AvPtr expiry frames video (fromAudioPtrJson audio) start
+  Jd.RealTimeUserAVPT rtUser -> -- expiry frames video audio start
+    Right $ Ct.RealtimeAvPP $ Ct.AvPtr rtUser.expiryDatetimeRtuav rtUser.framesApRtuav rtUser.videoContainerApRtuav (fromAudioPtrJson rtUser.audioApRtuav) rtUser.audioStartTimestampRtuav
 
 
 partToJsonApprox :: Ct.PartPL -> Jd.MultiModalPart
 partToJsonApprox = \case
-  Ct.TextPP text ->
-    Jd.TextPT text
+  Ct.TextPP text -> Jd.TextPT text
 
   Ct.AudioTransPP text direction decodingId ->
-    Jd.AudioTranscriptionPT text direction decodingId
+    Jd.AudioTranscriptionPT $ Jd.AudioTranscriptionPL text direction decodingId
 
-  Ct.AudioAssetPP ptr ->
-    Jd.AudioAssetPointerPT $ audioPtrToJsonApprox ptr
+  Ct.AudioAssetPP ptr -> Jd.AudioAssetPointerPT $ audioPtrToJsonApprox ptr
 
   Ct.ImageAssetPP (Ct.ImagePtr asset size width height fovea metadata) ->
-    Jd.ImageAssetPointerPT asset (fromIntegral size) (fromIntegral width) (fromIntegral height) fovea
+    Jd.ImageAssetPointerPT $ Jd.ImageAssetPointerPL asset (fromIntegral size) (fromIntegral width) (fromIntegral height) fovea
       (imageMetaToJsonApprox <$> metadata)
 
   Ct.RealtimeAvPP (Ct.AvPtr expiry frames video audio start) ->
-    Jd.RealTimeUserAVPT expiry frames video (audioPtrToJsonApprox audio) start
+    Jd.RealTimeUserAVPT $ Jd.RealTimeUserAVPL expiry frames video (audioPtrToJsonApprox audio) start
 
 
 fromAudioPtrJson :: Jd.AudioAssetPointer -> Ct.AudioPtr
@@ -321,23 +319,28 @@ fromAudioMetaJson
 
 
 audioMetaToJsonApprox :: Ct.AudioMeta -> Jd.AudioMetadata
-audioMetaToJsonApprox
-    (Ct.AudioMeta startTimestamp endTimestamp pretokenized interruptions originalSource transcription wordTranscription start end) =
-  Jd.AudioMetadata startTimestamp endTimestamp pretokenized interruptions originalSource transcription wordTranscription start end
+audioMetaToJsonApprox (Ct.AudioMeta startTimestamp endTimestamp pretokenized interruptions originalSource
+    transcription wordTranscription start end) =
+  Jd.AudioMetadata startTimestamp endTimestamp pretokenized interruptions 
+        originalSource transcription wordTranscription start end
 
 
-fromThoughtJson :: Jd.Thought -> Ct.ThoughtRow
-fromThoughtJson (Jd.Thought summary content mbChunks mbFinished) =
+fromThoughtJson :: Jd.ThoughtContent -> Ct.ThoughtRow
+fromThoughtJson aThought = -- (Jd.Thought summary content mbChunks mbFinished)
   let
-    chunks = fromMaybe Ae.Null mbChunks
-    finished = fromMaybe False mbFinished
+    chunks = Ae.toJSON aThought.chunksTC
   in
-  Ct.ThoughtRow summary content chunks finished
+  Ct.ThoughtRow aThought.summaryTC aThought.contentTC chunks aThought.finishedTC
 
 
-thoughtToJsonApprox :: Ct.ThoughtRow -> Jd.Thought
+thoughtToJsonApprox :: Ct.ThoughtRow -> Jd.ThoughtContent
 thoughtToJsonApprox (Ct.ThoughtRow summary content chunks finished) =
-  Jd.Thought summary content (Just chunks) (Just finished)
+  let
+    textChks = case Ae.fromJSON chunks :: Ae.Result [Text] of
+      Ae.Success textChks -> textChks
+      Ae.Error _ -> []
+  in
+  Jd.ThoughtContent summary content textChks finished
 
 
 valueAudioPtr :: Ct.AudioPtr -> Ae.Value

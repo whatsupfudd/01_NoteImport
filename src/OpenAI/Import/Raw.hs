@@ -12,15 +12,17 @@ import qualified Hasql.Pool as Hp
 import qualified OpenAI.Import.Lookup as Lk
 import qualified OpenAI.Import.Report as Rp
 import qualified OpenAI.Import.Types as It
-import qualified OpenAI.Json.Reader as Jd
-import qualified OpenAI.Json.V2 as Jv2
-import qualified OpenAI.Serialize.Conversation as Scv
-import qualified OpenAI.Serialize.IncrUpdate as Sin
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Serialize.Conversation as Scv
+import qualified OpenAI.Conversation.Serialize.IncrUpdate as Sin
 
 
 addFresh :: Hp.Pool -> Jd.Conversation -> IO (Either Hp.UsageError (Either Text Rp.Report))
-addFresh pool conversation = do
-  result <- Scv.addConversationR pool conversation
+addFresh pool conversation =
+  let
+    fakeV1 = Sin.currentToV1 conversation
+  in do
+  result <- Scv.addConversationR pool fakeV1
   pure $
     case result of
       Left usageError -> Left usageError
@@ -40,7 +42,7 @@ updateKnown pool rowConv conversation sourceKey = do
 reportFresh :: Jd.Conversation -> Scv.ReportRawAdd -> Rp.Report
 reportFresh conversation reportRaw =
   Rp.Report {
-    Rp.eidConv = conversation.convIdCv
+    Rp.eidConv = conversation.oaiIdCv
     , Rp.uidConv = Just reportRaw.uidConv
     , Rp.uidDisc = Nothing
     , Rp.action = It.AddFreshA
@@ -74,7 +76,7 @@ notesFresh reportRaw =
 reportKnown :: Lk.RowConv -> Jd.Conversation -> Sin.ReportRaw -> Rp.Report
 reportKnown rowConv conversation reportRaw =
   Rp.Report {
-    Rp.eidConv = conversation.convIdCv
+    Rp.eidConv = conversation.oaiIdCv
     , Rp.uidConv = Just reportRaw.uidConv
     , Rp.uidDisc = Nothing
     , Rp.action = It.UpdateKnownA
@@ -124,8 +126,8 @@ notesKnown rowConv conversation reportRaw =
       | rowConv.uidConv /= reportRaw.uidConv =
           [Rp.WarnN $ "raw update returned conversation uid "
             <> showText reportRaw.uidConv <> ", expected " <> showText rowConv.uidConv]
-      | rowConv.eidConv /= conversation.convIdCv =
-          [Rp.WarnN $ "raw update input eid " <> quoteText conversation.convIdCv
+      | rowConv.eidConv /= conversation.oaiIdCv =
+          [Rp.WarnN $ "raw update input eid " <> quoteText conversation.oaiIdCv
             <> " differs from the selected database eid " <> quoteText rowConv.eidConv]
       | otherwise =
           []

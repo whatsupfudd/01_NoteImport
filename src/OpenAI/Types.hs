@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 module OpenAI.Types where
 
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 
 import GHC.Generics (Generic)
@@ -31,8 +32,8 @@ data MessageFsm =
   deriving (Show)
 
 data Timing = Timing {
-  createTime :: Maybe Double
-  , updateTime :: Maybe Double
+  createTime :: Maybe Scientific
+  , updateTime :: Maybe Scientific
 } deriving (Show)
 
 

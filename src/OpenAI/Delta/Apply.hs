@@ -11,6 +11,7 @@ import Data.List (foldl', sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Mp
 import Data.Maybe (catMaybes, mapMaybe)
+import Data.Scientific (Scientific, toRealFloat)
 import Data.Set (Set)
 import qualified Data.Set as St
 import Data.Text (Text)
@@ -27,9 +28,11 @@ import qualified Hasql.Transaction as Htx
 
 import qualified OpenAI.Delta.Snap as Ds
 import qualified OpenAI.Delta.Types as Dt
-import qualified OpenAI.Json.Reader as Jd
-import qualified OpenAI.Serialize.Content as Cw
-import qualified OpenAI.Serialize.ConversationStmt as Cs
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+import qualified OpenAI.Conversation.Json.V1.Convert as Jcv
+import qualified OpenAI.Conversation.Serialize.Content as Cw
+import qualified OpenAI.Conversation.Serialize.ConversationStmt as Cs
 
 
 data ApplyResult = ApplyResult {
@@ -52,7 +55,7 @@ data ApplySt = ApplySt {
   }
 
 
-apply :: Text -> Jd.Conversation -> Ds.ConvSnap -> Dt.Delta -> Htx.Transaction (Either [Dt.Conflict] ApplyResult)
+apply :: Text -> Jv1.Conversation -> Ds.ConvSnap -> Dt.Delta -> Htx.Transaction (Either [Dt.Conflict] ApplyResult)
 apply sourceKey conversation jsonSnap delta =
   case preflight conversation jsonSnap delta of
     conflicts@(_ : _) -> pure $ Left conflicts
@@ -80,14 +83,13 @@ apply sourceKey conversation jsonSnap delta =
                   msgRewriteRez <- applyMessageRewrites conversation rewriteActs
                   case msgRewriteRez of
                     Left conflicts -> abort conflicts
-                    Right rewrittenMsgCnt -> do
-                      Htx.statement
-                        ( delta.uidConv
-                        , nonEmpty sourceKey
-                        , Just $ sha256 $ Ae.encode conversation
-                        , "applied"
-                        )
-                        Cs.insertConversationIngest
+                    Right rewrittenMsgCnt ->
+                      -- TODO: handle the V1 vs V2 correctly.
+                      let
+                        v2Conv = Jcv.v1ToCurrent conversation
+                      in do
+                      Htx.statement (delta.uidConv, nonEmpty sourceKey, Just $ sha256 $ Ae.encode v2Conv
+                        , "applied") Cs.insertConversationIngest
 
                       pure $ Right ApplyResult {
                           uidConv = delta.uidConv
@@ -112,8 +114,8 @@ applyMeta conversationUid metaAct =
   case metaAct of
     Dt.KeepMeta -> pure False
     Dt.UpdateMeta titleOld titleNew timeOld timeNew -> do
-      Htx.statement (conversationUid, timeOld, titleOld) Cs.insertConversationPrevious
-      Htx.statement (titleNew, timeNew, conversationUid) Cs.updateConversation
+      Htx.statement (conversationUid, toRealFloat timeOld, titleOld) Cs.insertConversationPrevious
+      Htx.statement (titleNew, toRealFloat timeNew, conversationUid) Cs.updateConversation
       pure True
     Dt.RejectOlderMeta _ _ -> pure False
 
@@ -134,7 +136,7 @@ applyMoves uidByEid nodeSnapByEid actions =
         scanNode (movedCnt + 1) rest
 
 
-applyAddedNodes :: Int64 -> Jd.Conversation -> Map Text Int64 -> [Dt.NodeAct]
+applyAddedNodes :: Int64 -> Jv1.Conversation -> Map Text Int64 -> [Dt.NodeAct]
       -> Htx.Transaction (Either [Dt.Conflict] ApplySt)
 applyAddedNodes conversationUid conversation uidByEid =
   foldNodes ApplySt {
@@ -172,7 +174,7 @@ applyAddedNodes conversationUid conversation uidByEid =
       _ -> foldNodes state rest
 
 
-applyMessageAdds :: Jd.Conversation -> Set Text -> Map Text Int64 -> [Dt.NodeAct]
+applyMessageAdds :: Jv1.Conversation -> Set Text -> Map Text Int64 -> [Dt.NodeAct]
       -> Htx.Transaction (Either [Dt.Conflict] Int)
 applyMessageAdds conversation addedEids uidByEid actions =
   foldMsg 0 $ mapMaybe addMsgFromNodeAct actions
@@ -193,7 +195,7 @@ applyMessageAdds conversation addedEids uidByEid actions =
                 foldMsg (addedCnt + 1) rest
 
 
-applyMessageRewrites :: Jd.Conversation -> [Dt.NodeAct]
+applyMessageRewrites :: Jv1.Conversation -> [Dt.NodeAct]
       -> Htx.Transaction (Either [Dt.Conflict] Int)
 applyMessageRewrites conversation actions =
   iterMsg 0 $ mapMaybe rewriteMsgFromNodeAct actions
@@ -241,7 +243,7 @@ rewriteMessage messageUid oldHash message = do
           pure $ Right ()
 
 
-preflight :: Jd.Conversation -> Ds.ConvSnap -> Dt.Delta -> [Dt.Conflict]
+preflight :: Jv1.Conversation -> Ds.ConvSnap -> Dt.Delta -> [Dt.Conflict]
 preflight conversation jsonSnap delta =
   identityConflicts conversation jsonSnap delta
     <> actionConflicts delta
@@ -255,7 +257,7 @@ preflight conversation jsonSnap delta =
   addActs = sortAddActs delta.nodeActs
 
 
-identityConflicts :: Jd.Conversation -> Ds.ConvSnap -> Dt.Delta -> [Dt.Conflict]
+identityConflicts :: Jv1.Conversation -> Ds.ConvSnap -> Dt.Delta -> [Dt.Conflict]
 identityConflicts conversation jsonSnap delta =
   catMaybes [
       mismatch "JSON conversation and delta" conversation.convIdCv delta.eidConv
@@ -289,7 +291,7 @@ actionConflicts delta =
       _ -> []
 
 
-duplicateConflicts :: Jd.Conversation -> Dt.Delta -> [Dt.Conflict]
+duplicateConflicts :: Jv1.Conversation -> Dt.Delta -> [Dt.Conflict]
 duplicateConflicts conversation delta =
   map Dt.DuplicateEidC duplicateNodeAdds <> map Dt.DuplicateEidC duplicateMessageEids
   where
@@ -327,7 +329,7 @@ validateNodeRefs =
       Just _ -> []
 
 
-validateAddActs :: Jd.Conversation -> Ds.ConvSnap -> Map Text Int64 -> [Dt.NodeAct] -> [Dt.Conflict]
+validateAddActs :: Jv1.Conversation -> Ds.ConvSnap -> Map Text Int64 -> [Dt.NodeAct] -> [Dt.Conflict]
 validateAddActs conversation jsonSnap initialUids actions =
   snd $ foldl' foldValidation (Mp.keysSet initialUids, []) actions
   where
@@ -409,7 +411,7 @@ validateMoveActs jsonSnap initialUids =
       _ -> []
 
 
-validateMessageActs :: Jd.Conversation -> [Dt.NodeAct] -> [Dt.Conflict]
+validateMessageActs :: Jv1.Conversation -> [Dt.NodeAct] -> [Dt.Conflict]
 validateMessageActs conversation =
   concatMap validateNode
   where
@@ -540,23 +542,23 @@ snapNodeMap snapshot =
   Mp.fromList $ map (\node -> (node.eidNode, node)) snapshot.nodes
 
 
-jsonMessageMap :: Jd.Conversation -> Map Text Jd.Message
+jsonMessageMap :: Jv1.Conversation -> Map Text Jd.Message
 jsonMessageMap conversation =
   Mp.fromList $ messageEntries conversation
 
 
-messageEntries :: Jd.Conversation -> [(Text, Jd.Message)]
+messageEntries :: Jv1.Conversation -> [(Text, Jd.Message)]
 messageEntries conversation =
   mapMaybe fromNode $ Mp.elems conversation.mappingCv
   where
-  fromNode :: Jd.Node -> Maybe (Text, Jd.Message)
+  fromNode :: Jv1.Node -> Maybe (Text, Jd.Message)
   fromNode node =
     case node.messageNd of
       Nothing -> Nothing
       Just message -> Just (message.idMsg, message)
 
 
-messageAtNode :: Jd.Conversation -> Text -> Text -> Maybe Jd.Message
+messageAtNode :: Jv1.Conversation -> Text -> Text -> Maybe Jd.Message
 messageAtNode conversation eidNode eidMsg = do
   node <- Mp.lookup eidNode conversation.mappingCv
   message <- node.messageNd

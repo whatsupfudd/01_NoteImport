@@ -5,6 +5,7 @@ where
 
 import Data.List (foldl', maximumBy, sortOn)
 import Data.Ord (comparing)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Mp
@@ -13,7 +14,7 @@ import qualified Network.HTTP.Client as Ht
 import qualified OpenAI.Import.Run as Run
 import qualified OpenAI.Import.Types as Typ
 import qualified OpenAI.Import.Report as Rpt
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Json.Schema as Jd
 
 data ConvIx = ConvIx
   { ixInp :: Int
@@ -55,7 +56,7 @@ runBatch mgr pool source opts convs =
           rpt = dbErrReport convIx.convInp dbErr
           acc1 = pushErr dbErr (pushRep convIx.ixInp rpt acc)
         if stopOnFail then
-          pure (pushHalted ("batch stopped after database error on " <> convIx.convInp.convIdCv) rest acc1)
+          pure (pushHalted ("batch stopped after database error on " <> convIx.convInp.oaiIdCv) rest acc1)
         else
           foldBatch acc1 rest
       Right rpt -> do
@@ -82,7 +83,7 @@ dedupConvs convs =
 
 groupByEid :: [ConvIx] -> Mp.Map Text [ConvIx]
 groupByEid =
-  foldl' (\acc convIx -> Mp.insertWith (<>) convIx.convInp.convIdCv [convIx] acc) Mp.empty
+  foldl' (\acc convIx -> Mp.insertWith (<>) convIx.convInp.oaiIdCv [convIx] acc) Mp.empty
 
 
 chooseWinner :: [ConvIx] -> (ConvIx, [ConvIx])
@@ -94,7 +95,7 @@ chooseWinner convsIx =
   (winner, drops)
 
 
-rankConv :: ConvIx -> (Double, Int)
+rankConv :: ConvIx -> (Scientific, Int)
 rankConv convIx = (convIx.convInp.updateTimeCv, convIx.ixInp)
 
 
@@ -124,7 +125,7 @@ isHardFail rpt = rpt.action == Typ.FailA
 dupReport :: ConvIx -> ConvIx -> Rpt.Report
 dupReport convDrop convKeep =
   Rpt.Report
-    { eidConv = convDrop.convInp.convIdCv
+    { eidConv = convDrop.convInp.oaiIdCv
     , uidConv = Nothing
     , uidDisc = Nothing
     , action = Typ.SkipSameA
@@ -139,7 +140,7 @@ dupReport convDrop convKeep =
 dbErrReport :: Jd.Conversation -> Hp.UsageError -> Rpt.Report
 dbErrReport conv dbErr =
   Rpt.Report
-    { eidConv = conv.convIdCv
+    { eidConv = conv.oaiIdCv
     , uidConv = Nothing
     , uidDisc = Nothing
     , action = Typ.FailA
@@ -154,7 +155,7 @@ dbErrReport conv dbErr =
 haltedReport :: Jd.Conversation -> Text -> Rpt.Report
 haltedReport conv reason =
   Rpt.Report
-    { eidConv = conv.convIdCv
+    { eidConv = conv.oaiIdCv
     , uidConv = Nothing
     , uidDisc = Nothing
     , action = Typ.SkipSameA
@@ -166,7 +167,7 @@ haltedReport conv reason =
 dupMsg :: ConvIx -> ConvIx -> Text
 dupMsg convDrop convKeep =
   let
-    eid = convDrop.convInp.convIdCv
+    eid = convDrop.convInp.oaiIdCv
     updDrop = convDrop.convInp.updateTimeCv
     updKeep = convKeep.convInp.updateTimeCv
     whyKeep = if updDrop < updKeep then

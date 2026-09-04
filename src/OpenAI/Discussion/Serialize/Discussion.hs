@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use for_" #-}
 {-# HLINT ignore "Use forM_" #-}
-module OpenAI.Serialize.Discussion where
+module OpenAI.Discussion.Serialize.Discussion where
 
 import Control.Monad (when, forM_, forM, void)
 import Control.Monad.IO.Class (liftIO)
@@ -12,6 +12,7 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
 import qualified Data.HashMap.Strict as HM
 import Data.Maybe (isJust, fromJust, fromMaybe, isNothing)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
@@ -26,13 +27,12 @@ import qualified Data.Aeson as Ae
 
 import qualified Hasql.Pool as Hp
 import qualified Hasql.Session as Ses
-import qualified OpenAI.Serialize.DiscussionStmt as St
+import qualified OpenAI.Discussion.Serialize.DiscussionStmt as St
 import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Tx
 
-import OpenAI.Json.Reader
+import qualified OpenAI.Conversation.Json.Schema as Jd
 import OpenAI.Types
-import OpenAI.Parse (analyzeDiscussion, findRootNode)
 import Data.List (find)
 
 -- | useTx: helper to wrap a statement into a transaction.
@@ -137,7 +137,7 @@ addSubActions msgUid sas =
 -- -----------------------
 
 -- Used only for best-effort matching of currentMsg.
-messageKey :: MessageFsm -> (Text, Maybe Double, Maybe Double, Text)
+messageKey :: MessageFsm -> (Text, Maybe Scientific, Maybe Scientific, Text)
 messageKey m =
   let (Timing c u, body, k) = case m of
         UserMF t um -> (t, um.textUM, "user")
@@ -169,5 +169,5 @@ messageKindText m = case m of
   ToolMF{} -> "tool"
   UnknownMF{} -> "unknown"
 
-epochToUtc :: Double -> UTCTime
+epochToUtc :: Scientific -> UTCTime
 epochToUtc = posixSecondsToUTCTime . realToFrac

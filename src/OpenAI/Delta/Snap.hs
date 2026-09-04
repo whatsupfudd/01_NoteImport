@@ -14,6 +14,7 @@ import Data.List (group, sort, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Mp
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as Tx
 import qualified Data.Vector as V
@@ -28,16 +29,17 @@ import qualified Crypto.Hash as Ch
 
 import qualified OpenAI.Conversation as Cv
 import OpenAI.Delta.Types (Conflict(..), Hash(..))
-import qualified OpenAI.Json.Reader as Jd
-import qualified OpenAI.Order as Oor
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+import qualified OpenAI.Conversation.Json.V1.Order as Oor
 
 
 data ConvSnap = ConvSnap {
     eidConv :: Text
     , uidConv :: Maybe Int64
     , titleConv :: Text
-    , timeCreateCv :: Double
-    , timeUpdateCv :: Double
+    , timeCreateCv :: Scientific
+    , timeUpdateCv :: Scientific
     , nodes :: [NodeSnap]
   }
   deriving stock (Eq, Show)
@@ -60,11 +62,11 @@ data NodeSnap = NodeSnap {
 data MsgSnap = MsgSnap {
     eidMsg :: Text
     , uidMsg :: Maybe Int64
-    , timeCreate :: Maybe Double
-    , timeUpdate :: Maybe Double
+    , timeCreate :: Maybe Scientific
+    , timeUpdate :: Maybe Scientific
     , status :: Text
     , endTurn :: Maybe Bool
-    , weight :: Double
+    , weight :: Scientific
     , metadata :: Ae.Value
     , recipient :: Text
     , channel :: Maybe Text
@@ -84,7 +86,7 @@ data ContentSnap = ContentSnap {
   deriving stock (Eq, Show)
 
 
-fromJson :: Jd.Conversation -> Either [Conflict] ConvSnap
+fromJson :: Jv1.Conversation -> Either [Conflict] ConvSnap
 fromJson conv =
   case Oor.buildNodeOrd conv.mappingCv of
     Left issues ->
@@ -143,7 +145,7 @@ fromDb conv =
         else Left issues0
 
 
-topConflictsJs :: Jd.Conversation -> [Conflict]
+topConflictsJs :: Jv1.Conversation -> [Conflict]
 topConflictsJs conv =
   finiteConflict "conversation.create_time" conv.createTimeCv
     <> finiteConflict "conversation.update_time" conv.updateTimeCv
@@ -157,7 +159,7 @@ topConflictsDb conv =
     <> emptyTxtConflict "conversation.eid" conv.eidCv
 
 
-nodeKeyConflictsJs :: Map Text Jd.Node -> [Conflict]
+nodeKeyConflictsJs :: Map Text Jv1.Node -> [Conflict]
 nodeKeyConflictsJs mapping =
   [ BrokenShapeC $
       "json node key/id mismatch: key=" <> eidKey <> ", id=" <> node.idNd
@@ -175,7 +177,7 @@ nodeKeyConflictsDb mapping =
   ]
 
 
-msgDupConflictsJs :: Map Text Jd.Node -> [Conflict]
+msgDupConflictsJs :: Map Text Jv1.Node -> [Conflict]
 msgDupConflictsJs mapping =
   map DuplicateEidC $ dupTxts $ catMaybes [(.idMsg) <$> node.messageNd | node <- Mp.elems mapping]
 
@@ -185,7 +187,7 @@ msgDupConflictsDb mapping =
   map DuplicateEidC $ dupTxts $ catMaybes [(.eidMsg) <$> node.messageNd | node <- Mp.elems mapping]
 
 
-nodeSnapJs :: Map Text Jd.Node -> Map Text Oor.NodeOrd -> Oor.NodeOrd -> Either [Conflict] NodeSnap
+nodeSnapJs :: Map Text Jv1.Node -> Map Text Oor.NodeOrd -> Oor.NodeOrd -> Either [Conflict] NodeSnap
 nodeSnapJs mapping ordMap ord =
   case Mp.lookup ord.eidNode mapping of
     Nothing ->
@@ -252,7 +254,7 @@ nodeSnapDb eidByUid node = do
     }
 
 
-parentConflictJs :: Jd.Node -> Oor.NodeOrd -> [Conflict]
+parentConflictJs :: Jv1.Node -> Oor.NodeOrd -> [Conflict]
 parentConflictJs node ord
   | node.parentNd == ord.eidParent = []
   | otherwise =
@@ -267,7 +269,7 @@ msgSnapJs msg = do
   let
     issues0 =
       emptyTxtConflict "message.eid" msg.idMsg
-        <> finiteConflictMb ("message.create_time:" <> msg.idMsg) msg.createTimeMsg
+        <> finiteConflictMb ("message.create_time:" <> msg.idMsg) (Just msg.createTimeMsg)
         <> finiteConflictMb ("message.update_time:" <> msg.idMsg) msg.updateTimeMsg
     content0 = contentSnapJs 0 msg.contentMsg
     contents0 = [content0]
@@ -278,7 +280,7 @@ msgSnapJs msg = do
       Right MsgSnap {
           eidMsg = msg.idMsg
           , uidMsg = Nothing
-          , timeCreate = msg.createTimeMsg
+          , timeCreate = Just msg.createTimeMsg
           , timeUpdate = msg.updateTimeMsg
           , status = msg.statusMsg
           , endTurn = msg.endTurnMsg
@@ -352,61 +354,61 @@ contentSnapDb seq0 content =
 
 contentPairJs :: Jd.Content -> (Text, Ae.Value)
 contentPairJs = \case
-  Jd.CodeCT lang fmt txt ->
-    ("code", Ae.object ["language" .= lang, "format" .= fmt, "text" .= txt])
+  Jd.CodeCT cBlock -> -- lang fmt txt
+    ("code", Ae.object ["language" .= cBlock.languageCP, "format" .= cBlock.responseFormatNameCP, "text" .= cBlock.textCP])
 
-  Jd.ExecutionOutputCT txt ->
-    ("execution_output", Ae.object ["text" .= txt])
+  Jd.ExecutionOutputCT execOut ->
+    ("execution_output", Ae.object ["text" .= execOut.textEO])
 
-  Jd.MultimodalTextCT parts ->
-    ("multimodal_text", Ae.object ["parts" .= map partValJs parts])
+  Jd.MultimodalTextCT mmt ->
+    ("multimodal_text", Ae.object ["parts" .= map partValJs mmt.partsMmt])
 
-  Jd.ModelEditableContextCT model repo rs sc ->
+  Jd.ModelEditableContextCT modelCtx -> -- model repo rs sc
     ("model_editable_context",
       Ae.object [
-          "model_set_context" .= model
-          , "repository" .= repo
-          , "repo_summary" .= rs
-          , "structured_context" .= sc
+          "model_set_context" .= modelCtx.modelSetMEC
+          , "repository" .= modelCtx.repositoryMEC
+          , "repo_summary" .= modelCtx.repoSummaryMEC
+          , "structured_context" .= modelCtx.structuredMEC
         ])
 
-  Jd.ReasoningRecapCT txt ->
-    ("reasoning_recap", Ae.object ["content" .= txt])
+  Jd.ReasoningRecapCT recap -> -- txt
+    ("reasoning_recap", Ae.object ["content" .= recap.contentRR])
 
-  Jd.SystemErrorCT name0 txt ->
-    ("system_error", Ae.object ["name" .= name0, "text" .= txt])
+  Jd.SystemErrorCT sysErr -> -- name0 txt
+    ("system_error", Ae.object ["name" .= sysErr.nameSER, "text" .= sysErr.textSER])
 
-  Jd.TetherBrowsingDisplayCT result0 summary0 assets0 tether0 ->
+  Jd.TetherBrowsingDisplayCT tbDisplay -> -- result0 summary0 assets0 tether0
     ("tether_browsing_display",
       Ae.object [
-          "result" .= result0
-          , "summary" .= summary0
-          , "assets" .= assets0
-          , "tether_id" .= tether0
+          "result" .= tbDisplay.resultTbd
+          , "summary" .= tbDisplay.summaryTbd
+          , "assets" .= tbDisplay.assetsTbd
+          , "tether_id" .= tbDisplay.tetherIDTbd
         ])
 
-  Jd.TetherQuoteCT url0 domain0 txt title0 tether0 ->
+  Jd.TetherQuoteCT tq -> -- url0 domain0 txt title0 tether0
     ("tether_quote",
       Ae.object [
-          "url" .= url0
-          , "domain" .= domain0
-          , "text" .= txt
-          , "title" .= title0
-          , "tether_id" .= tether0
+          "url" .= tq.urlTq
+          , "domain" .= tq.domainTq
+          , "text" .= tq.textTq
+          , "title" .= tq.titleTq
+          , "tether_id" .= tq.tetherIDTq
         ])
 
   Jd.TextCT parts ->
-    ("text", Ae.object ["parts" .= parts])
+    ("text", Ae.object ["parts" .= parts.partsTP])
 
-  Jd.ThoughtsCT thoughts0 src0 ->
+  Jd.ThoughtsCT thoughts -> -- thoughts0 src0
     ("thoughts",
       Ae.object [
-          "source_analysis_msg_id" .= src0
-          , "thoughts" .= map thoughtValJs thoughts0
+          "source_analysis_msg_id" .= thoughts.sourceAnalysisMsgIdTP
+          , "thoughts" .= map thoughtValJs thoughts.thoughtsTP
         ])
 
-  Jd.OtherCT typ0 raw0 ->
-    (typ0, Ae.toJSON raw0)
+  Jd.OtherCT info ->
+    (info.contentTypeOpl, Ae.toJSON info.rawOpl)
 
 
 contentPairDb :: Cv.ContentDb -> (Text, Ae.Value)
@@ -473,38 +475,38 @@ partValJs = \case
   Jd.TextPT txt ->
     Ae.object ["kind" .= ("text" :: Text), "text" .= txt]
 
-  Jd.AudioTranscriptionPT txt direction0 decoding0 ->
+  Jd.AudioTranscriptionPT transcript ->
     Ae.object [
         "kind" .= ("audio_transcription" :: Text)
-        , "text" .= txt
-        , "direction" .= direction0
-        , "decoding_id" .= decoding0
+        , "text" .= transcript.textAtp
+        , "direction" .= transcript.directionAtp
+        , "decoding_id" .= transcript.decodingIdAtp
       ]
 
-  Jd.AudioAssetPointerPT ptr ->
+  Jd.AudioAssetPointerPT audioPtr ->
     Ae.object [
         "kind" .= ("audio_asset_pointer" :: Text)
-        , "ptr" .= audioPtrValJs ptr
+        , "ptr" .= audioPtrValJs audioPtr
       ]
 
-  Jd.ImageAssetPointerPT asset0 size0 width0 height0 fovea0 meta0 ->
+  Jd.ImageAssetPointerPT imgPtr -> -- asset0 size0 width0 height0 fovea0 meta0
     Ae.object [
         "kind" .= ("image_asset_pointer" :: Text)
-        , "asset_pointer" .= asset0
-        , "size_bytes" .= size0
-        , "width" .= width0
-        , "height" .= height0
-        , "fovea" .= fovea0
-        , "metadata" .= fmap imgMetaValJs meta0
+        , "asset_pointer" .= imgPtr.assetPointerPap
+        , "size_bytes" .= imgPtr.sizeBytesPap
+        , "width" .= imgPtr.widthPap
+        , "height" .= imgPtr.heightPap
+        , "fovea" .= imgPtr.foveaPap
+        , "metadata" .= fmap imgMetaValJs imgPtr.metadataPap
       ]
 
-  Jd.RealTimeUserAVPT expiry0 frames0 video0 _audio0 start0 ->
+  Jd.RealTimeUserAVPT rtUser -> -- expiry0 frames0 video0 _audio0 start0
     Ae.object [
         "kind" .= ("realtime_user_av" :: Text)
-        , "expiry_datetime" .= expiry0
-        , "frames_asset_pointers" .= frames0
-        , "video_container_asset_pointer" .= video0
-        , "audio_start_timestamp" .= start0
+        , "expiry_datetime" .= rtUser.expiryDatetimeRtuav
+        , "frames_asset_pointers" .= rtUser.framesApRtuav
+        , "video_container_asset_pointer" .= rtUser.videoContainerApRtuav
+        , "audio_start_timestamp" .= rtUser.audioStartTimestampRtuav
         , "audio_asset_pointer_omitted" .= True
       ]
 
@@ -696,13 +698,13 @@ audioMetaValDb meta0 =
     ]
 
 
-thoughtValJs :: Jd.Thought -> Ae.Value
+thoughtValJs :: Jd.ThoughtContent -> Ae.Value
 thoughtValJs th =
   Ae.object [
-      "summary" .= th.summaryTh
-      , "content" .= th.contentTh
-      , "chunks" .= maybe Ae.Null Ae.toJSON th.chunksTh
-      , "finished" .= fromMaybe False th.finishedTh
+      "summary" .= th.summaryTC
+      , "content" .= th.contentTC
+      , "chunks" .= Ae.toJSON th.chunksTC
+      , "finished" .= th.finishedTC
     ]
 
 
@@ -846,13 +848,12 @@ ordConflict = \case
     BrokenShapeC $ "ordering failed on branch under " <> parent0 <> ": " <> Tx.intercalate "," children0
 
 
-finiteConflict :: Text -> Double -> [Conflict]
-finiteConflict label0 value0
-  | isNaN value0 || isInfinite value0 = [BrokenShapeC $ "non-finite number at " <> label0]
-  | otherwise = []
+-- TODO: to deprecate as Scientific is already fine.
+finiteConflict :: Text -> Scientific -> [Conflict]
+finiteConflict label0 value0 = []
 
 
-finiteConflictMb :: Text -> Maybe Double -> [Conflict]
+finiteConflictMb :: Text -> Maybe Scientific -> [Conflict]
 finiteConflictMb label0 =
   maybe [] (finiteConflict label0)
 

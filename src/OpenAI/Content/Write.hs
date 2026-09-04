@@ -8,6 +8,7 @@ module OpenAI.Content.Write (
 
 import Data.Int (Int32, Int64)
 import Data.Maybe (fromMaybe)
+import Data.Scientific (toRealFloat)
 import Data.Text (Text)
 import qualified Data.Aeson as Ae
 import qualified Data.Vector as V
@@ -16,8 +17,8 @@ import qualified Hasql.Transaction as Tx
 import qualified OpenAI.Content.Codec as Codec
 import qualified OpenAI.Content.Kind as Kind
 import OpenAI.Content.Types (IssueC(..), PartPL, Payload(..), ResultW(..), StatW(..), emptyStatW)
-import qualified OpenAI.Json.Reader as Jd
-import qualified OpenAI.Serialize.ContentStmt as St
+import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Serialize.ContentStmt as St
 
 
 insertMsg :: Int64 -> Int32 -> Jd.Message -> Tx.Transaction (Either IssueC ResultW)
@@ -31,11 +32,11 @@ insertMsg uidNode seqMsg msg =
           uidMsg <- Tx.statement
             ( uidNode
             , msg.idMsg
-            , msg.createTimeMsg
-            , msg.updateTimeMsg
+            , Just $ toRealFloat msg.createTimeMsg
+            , toRealFloat <$> msg.updateTimeMsg
             , msg.statusMsg
             , msg.endTurnMsg
-            , msg.weightMsg
+            , toRealFloat msg.weightMsg
             , Ae.toJSON msg.metadataMsg
             , msg.recipientMsg
             , msg.channelMsg
@@ -115,11 +116,11 @@ rewriteMsg uidMsg msg =
           Tx.statement uidMsg St.deleteAuthorByMsg
 
           Tx.statement
-            ( msg.createTimeMsg
-            , msg.updateTimeMsg
+            ( Just $ toRealFloat msg.createTimeMsg
+            , toRealFloat <$>msg.updateTimeMsg
             , msg.statusMsg
             , msg.endTurnMsg
-            , msg.weightMsg
+            , toRealFloat msg.weightMsg
             , Ae.toJSON msg.metadataMsg
             , msg.recipientMsg
             , msg.channelMsg
@@ -157,9 +158,10 @@ validatePart part =
 partJson :: PartPL -> Either IssueC Jd.MultiModalPart
 partJson part =
   case Codec.toJsonApprox $ MultiPL [part] of
-    Jd.MultimodalTextCT [partJs] -> Right partJs
-    Jd.MultimodalTextCT _ -> Left $ BadPayloadIC "canonical multimodal part did not produce exactly one JSON part"
-    _ -> Left $ BadPayloadIC "canonical multimodal part did not produce multimodal JSON content"
+    Jd.MultimodalTextCT mmTxt -> case mmTxt.partsMmt of
+      [partJs] -> Right partJs
+      _ -> Left $ BadPayloadIC "@[Write.partJson] canonical multimodal part did not produce exactly one JSON part"
+    _ -> Left $ BadPayloadIC "@[Write.partJson] canonical multimodal part did not produce multimodal JSON content"
 
 
 insertParts :: Int64 -> [PartPL] -> Tx.Transaction (Either IssueC StatW)
@@ -177,102 +179,63 @@ insertParts uidContent parts =
 insertContentBody :: Int64 -> Jd.Content -> Tx.Transaction StatW
 insertContentBody uidContent content =
   case content of
-    Jd.CodeCT{} -> do
-      Tx.statement
-        (uidContent, content.languageCc, content.responseFormatNameCc, content.textCc)
-        St.insertCodeContent
+    Jd.CodeCT code -> do
+      Tx.statement (uidContent, code.languageCP, code.responseFormatNameCP, code.textCP) St.insertCodeContent
       pure emptyStatW
 
-    Jd.ExecutionOutputCT{} -> do
-      Tx.statement
-        (uidContent, content.textEoc)
-        St.insertExecutionOutputContent
+    Jd.ExecutionOutputCT execOut -> do
+      Tx.statement (uidContent, execOut.textEO) St.insertExecutionOutputContent
       pure emptyStatW
 
-    Jd.MultimodalTextCT{} ->
+    Jd.MultimodalTextCT mmt -> do
+      rez <- mapM (insertPartBody uidContent) mmt.partsMmt
+      case rez of
+        [] -> pure emptyStatW
+        h : _ -> pure h
+
+    Jd.ModelEditableContextCT modelCtx -> do
+      Tx.statement ( uidContent, modelCtx.modelSetMEC, modelCtx.repositoryMEC, modelCtx.repoSummaryMEC
+          , modelCtx.structuredMEC
+        ) St.insertModelEditableContextContent
       pure emptyStatW
 
-    Jd.ModelEditableContextCT{} -> do
-      Tx.statement
-        ( uidContent
-        , content.modelSetContextMec
-        , content.repositoryMec
-        , content.repoSummaryMec
-        , content.structuredContextMec
-        )
-        St.insertModelEditableContextContent
+    Jd.ReasoningRecapCT recap -> do
+      Tx.statement (uidContent, recap.contentRR) St.insertReasoningRecapContent
       pure emptyStatW
 
-    Jd.ReasoningRecapCT{} -> do
-      Tx.statement
-        (uidContent, content.contentRrc)
-        St.insertReasoningRecapContent
+    Jd.SystemErrorCT sysErr -> do
+      Tx.statement (uidContent, sysErr.nameSER, sysErr.textSER) St.insertSystemErrorContent
       pure emptyStatW
 
-    Jd.SystemErrorCT{} -> do
-      Tx.statement
-        (uidContent, content.nameSes, content.textSes)
-        St.insertSystemErrorContent
+    Jd.TetherBrowsingDisplayCT tbdr -> do
+      Tx.statement ( uidContent, tbdr.resultTbd, Ae.toJSON <$> tbdr.summaryTbd, Ae.toJSON <$> tbdr.assetsTbd
+        , tbdr.tetherIDTbd) St.insertTetherBrowsingDisplayContent
       pure emptyStatW
 
-    Jd.TetherBrowsingDisplayCT{} -> do
-      Tx.statement
-        ( uidContent
-        , content.resultTbd
-        , Ae.toJSON <$> content.summaryTbd
-        , Ae.toJSON <$> content.assetsTbd
-        , content.tetherIDTbd
-        )
-        St.insertTetherBrowsingDisplayContent
+    Jd.TetherQuoteCT tq -> do
+      Tx.statement ( uidContent, tq.urlTq, tq.domainTq, tq.textTq, tq.titleTq, tq.tetherIDTq) St.insertTetherQuoteContent
       pure emptyStatW
 
-    Jd.TetherQuoteCT{} -> do
+    Jd.TextCT txt -> do
       Tx.statement
-        ( uidContent
-        , content.urlTq
-        , content.domainTq
-        , content.textTq
-        , content.titleTq
-        , content.tetherIDTq
-        )
-        St.insertTetherQuoteContent
-      pure emptyStatW
-
-    Jd.TextCT{} -> do
-      Tx.statement
-        (uidContent, V.fromList content.partsCt)
+        (uidContent, V.fromList txt.partsTP)
         St.insertTextContent
       pure emptyStatW
 
-    Jd.ThoughtsCT{} -> do
-      Tx.statement
-        (uidContent, content.sourceAnalysisMsgIdTc)
-        St.insertThoughtsContent
-
-      mapM_
-        (\(seqThought, thought) -> insertThought uidContent seqThought thought)
-        (zip [0 :: Int32 ..] content.thoughtsTc)
-
+    Jd.ThoughtsCT thoughts -> do
+      Tx.statement (uidContent, thoughts.sourceAnalysisMsgIdTP) St.insertThoughtsContent
+      mapM_ (\(seqThought, thought) -> insertThought uidContent seqThought thought) (zip [0 :: Int32 ..] thoughts.thoughtsTP)
       pure emptyStatW
 
-    Jd.OtherCT{} -> do
-      Tx.statement
-        (uidContent, Ae.toJSON content.rawOc)
-        St.insertUnknownContent
+    Jd.OtherCT info -> do
+      Tx.statement (uidContent, Ae.toJSON info.rawOpl) St.insertUnknownContent
       pure statUnknown
 
 
-insertThought :: Int64 -> Int32 -> Jd.Thought -> Tx.Transaction ()
+insertThought :: Int64 -> Int32 -> Jd.ThoughtContent -> Tx.Transaction ()
 insertThought uidContent seqThought thought =
-  Tx.statement
-    ( uidContent
-    , thought.summaryTh
-    , thought.contentTh
-    , fromMaybe (Ae.Array mempty) thought.chunksTh
-    , fromMaybe False thought.finishedTh
-    , seqThought
-    )
-    St.insertThought
+  Tx.statement ( uidContent, thought.summaryTC, thought.contentTC, Ae.toJSON thought.chunksTC
+      , thought.finishedTC, seqThought) St.insertThought
 
 
 insertPartBody :: Int64 -> Jd.MultiModalPart -> Tx.Transaction StatW
@@ -284,48 +247,47 @@ insertPartBody uidPart part =
         St.insertTextMMPart
       pure emptyStatW
 
-    Jd.AudioTranscriptionPT{} -> do
+    Jd.AudioTranscriptionPT audioTrans -> do
       Tx.statement
-        (uidPart, part.textAtp, part.directionAtp, part.decodingIdAtp)
+        (uidPart, audioTrans.textAtp, audioTrans.directionAtp, audioTrans.decodingIdAtp)
         St.insertAudioTranscriptionMMPart
       pure emptyStatW
 
-    Jd.AudioAssetPointerPT ptr ->
-      insertAudioAsset uidPart ptr
+    Jd.AudioAssetPointerPT ptr -> insertAudioAsset uidPart ptr
 
-    Jd.ImageAssetPointerPT{} -> do
+    Jd.ImageAssetPointerPT imgPtr -> do
       uidImage <- Tx.statement
         ( uidPart
-        , part.assetPointerPap
-        , fromIntegral part.sizeBytesPap
-        , fromIntegral part.widthPap
-        , fromIntegral part.heightPap
-        , part.foveaPap
+        , imgPtr.assetPointerPap
+        , fromIntegral imgPtr.sizeBytesPap
+        , fromIntegral imgPtr.widthPap
+        , fromIntegral imgPtr.heightPap
+        , imgPtr.foveaPap
         )
         St.insertImageAssetPointerMMPart
 
-      case part.metadataPap of
+      case imgPtr.metadataPap of
         Nothing -> pure emptyStatW
         Just metadata -> insertImageMetadata uidImage metadata
 
-    Jd.RealTimeUserAVPT{} -> do
+    Jd.RealTimeUserAVPT rtUser -> do
       uidAv <- Tx.statement
         ( uidPart
-        , part.expiryDatetimeRtuav
-        , Just $ Ae.toJSON part.framesAssetPointersRtuav
-        , part.videoContainerAssetPointer
-        , part.audioStartTimestampRtuav
+        , toRealFloat <$> rtUser.expiryDatetimeRtuav
+        , Just $ Ae.Array (V.fromList rtUser.framesApRtuav)
+        , rtUser.videoContainerApRtuav
+        , toRealFloat <$> rtUser.audioStartTimestampRtuav
         )
         St.insertRealTimeUserAVMMPart
 
-      insertAudioAsset uidAv part.audioAssetPointer
+      insertAudioAsset uidAv rtUser.audioApRtuav
 
 
 insertAudioAsset :: Int64 -> Jd.AudioAssetPointer -> Tx.Transaction StatW
 insertAudioAsset uidParent ptr = do
   uidAudio <- Tx.statement
     ( uidParent
-    , ptr.expiryDatetimeAap
+    , toRealFloat <$> ptr.expiryDatetimeAap
     , ptr.assetPointerAap
     , fromIntegral ptr.sizeBytesAap
     , ptr.formatAap
@@ -345,15 +307,15 @@ insertAudioMetadata uidAudio metadata =
   Tx.statement
     ( uidAudio
     , 0
-    , metadata.startTimestampAm
-    , metadata.endTimestampAm
+    , toRealFloat <$> metadata.startTimestampAm
+    , toRealFloat <$> metadata.endTimestampAm
     , metadata.pretokenizedVqAm
     , metadata.interruptionsAm
     , metadata.originalAudioSourceAm
     , metadata.transcriptionAm
     , metadata.wordTranscriptionAm
-    , metadata.startAm
-    , metadata.endAm
+    , toRealFloat metadata.startAm
+    , toRealFloat metadata.endAm
     )
     St.insertAudioMetadata
 

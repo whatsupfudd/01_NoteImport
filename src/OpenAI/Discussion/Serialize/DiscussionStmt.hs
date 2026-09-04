@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Serialize.DiscussionStmt where
+module OpenAI.Discussion.Serialize.DiscussionStmt where
 
 import Data.Text (Text)
 import Data.Int (Int32, Int64)

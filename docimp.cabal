@@ -38,6 +38,7 @@ library
       HttpSup.CorsPolicy
       MainLogic
       Notion.Fetch
+      OpenAI.Actions
       OpenAI.Content.Codec
       OpenAI.Content.Hash
       OpenAI.Content.Kind
@@ -45,6 +46,25 @@ library
       OpenAI.Content.Types
       OpenAI.Content.Write
       OpenAI.Conversation
+      OpenAI.Conversation.Deserialize.ContentStmt
+      OpenAI.Conversation.Deserialize.Conversation
+      OpenAI.Conversation.Deserialize.ConversationStmt
+      OpenAI.Conversation.Json.MsgSchema
+      OpenAI.Conversation.Json.Reader
+      OpenAI.Conversation.Json.Schema
+      OpenAI.Conversation.Json.Types
+      OpenAI.Conversation.Json.Utils
+      OpenAI.Conversation.Json.V1.Convert
+      OpenAI.Conversation.Json.V1.Order
+      OpenAI.Conversation.Json.V1.Parse
+      OpenAI.Conversation.Json.V1.Schema
+      OpenAI.Conversation.Process
+      OpenAI.Conversation.Serialize.Content
+      OpenAI.Conversation.Serialize.ContentStmt
+      OpenAI.Conversation.Serialize.Conversation
+      OpenAI.Conversation.Serialize.ConversationStmt
+      OpenAI.Conversation.Serialize.IncrUpdate
+      OpenAI.Conversation.Unify
       OpenAI.ConvToDisc
       OpenAI.Delta.Apply
       OpenAI.Delta.Hash
@@ -57,11 +77,11 @@ library
       OpenAI.Delta.Snap.Json
       OpenAI.Delta.Types
       OpenAI.Delta.Validate
-      OpenAI.Deserialize.ContentStmt
-      OpenAI.Deserialize.Conversation
-      OpenAI.Deserialize.ConversationStmt
-      OpenAI.Deserialize.Discussion
-      OpenAI.Deserialize.DiscussionStmt
+      OpenAI.Discussion.Deserialize.Discussion
+      OpenAI.Discussion.Deserialize.DiscussionStmt
+      OpenAI.Discussion.Serialize.Discussion
+      OpenAI.Discussion.Serialize.DiscussionIncr
+      OpenAI.Discussion.Serialize.DiscussionStmt
       OpenAI.Generate.Docx
       OpenAI.Generate.DocxDb
       OpenAI.Generate.DocxGeneral
@@ -77,21 +97,7 @@ library
       OpenAI.Import.Run
       OpenAI.Import.Summary
       OpenAI.Import.Types
-      OpenAI.Json.Reader
-      OpenAI.Json.Utils
-      OpenAI.Json.V1
-      OpenAI.Json.V2
-      OpenAI.Order
-      OpenAI.Parse
       OpenAI.ProjFetcher
-      OpenAI.Serialize.Content
-      OpenAI.Serialize.ContentStmt
-      OpenAI.Serialize.Conversation
-      OpenAI.Serialize.ConversationStmt
-      OpenAI.Serialize.Discussion
-      OpenAI.Serialize.DiscussionIncr
-      OpenAI.Serialize.DiscussionStmt
-      OpenAI.Serialize.IncrUpdate
       OpenAI.Summarisation
       OpenAI.Time
       OpenAI.Types

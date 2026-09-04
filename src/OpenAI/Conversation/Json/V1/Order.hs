@@ -1,5 +1,5 @@
 {-# LANGUAGE DerivingStrategies #-}
-module OpenAI.Order
+module OpenAI.Conversation.Json.V1.Order
   ( NodeOrd(..)
   , OrdIssue(..)
   , buildNodeOrd
@@ -19,7 +19,7 @@ import qualified Data.Map.Strict as Mp
 import qualified Data.Set as St
 import qualified Data.Text as Tx
 
-import qualified OpenAI.Json.Reader as Jd
+import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 
 
 data NodeOrd = NodeOrd
@@ -50,7 +50,7 @@ data WalkSt = WalkSt
   , issuesWs :: [OrdIssue]
   }
 
-buildNodeOrd :: Map Text Jd.Node -> Either [OrdIssue] [NodeOrd]
+buildNodeOrd :: Map Text Jv1.Node -> Either [OrdIssue] [NodeOrd]
 buildNodeOrd mapping = do
   eidRoot <- selectRoot mapping
   let issuesBase = validateMapping mapping
@@ -64,7 +64,7 @@ buildNodeOrd mapping = do
     then Right (reverse walk1.ordsRevWs)
     else Left (nub (issuesAll <> issuesBranch))
 
-selectRoot :: Map Text Jd.Node -> Either [OrdIssue] Text
+selectRoot :: Map Text Jv1.Node -> Either [OrdIssue] Text
 selectRoot mapping
   | Mp.member rootEidNode mapping = Right rootEidNode
   | otherwise =
@@ -72,34 +72,34 @@ selectRoot mapping
         eid : _ -> Right eid
         [] -> Left [MissingRootOI]
 
-validateMapping :: Map Text Jd.Node -> [OrdIssue]
+validateMapping :: Map Text Jv1.Node -> [OrdIssue]
 validateMapping mapping =
   concatMap validateOne (Mp.toAscList mapping)
   where
-    validateOne :: (Text, Jd.Node) -> [OrdIssue]
+    validateOne :: (Text, Jv1.Node) -> [OrdIssue]
     validateOne (eid, node) =
       missingParent eid node <> missingChildren node <> dupChildren eid node
 
-    missingParent :: Text -> Jd.Node -> [OrdIssue]
+    missingParent :: Text -> Jv1.Node -> [OrdIssue]
     missingParent eid node =
       case parentOf node of
         Just eidParent | Mp.notMember eidParent mapping -> [MissingParentOI eid eidParent]
         _ -> []
 
-    missingChildren :: Jd.Node -> [OrdIssue]
+    missingChildren :: Jv1.Node -> [OrdIssue]
     missingChildren node =
       [ MissingNodeOI eidChild
       | eidChild <- childrenOf node
       , Mp.notMember eidChild mapping
       ]
 
-    dupChildren :: Text -> Jd.Node -> [OrdIssue]
+    dupChildren :: Text -> Jv1.Node -> [OrdIssue]
     dupChildren eid node =
       [ DuplicateChildOI eid eidChild
       | eidChild <- duplicateItems (childrenOf node)
       ]
 
-branchIssues :: Map Text Jd.Node -> [OrdIssue]
+branchIssues :: Map Text Jv1.Node -> [OrdIssue]
 branchIssues mapping =
   [ BranchOI eid eidsChild
   | (eid, node) <- Mp.toAscList mapping
@@ -107,7 +107,7 @@ branchIssues mapping =
   , length eidsChild > 1
   ]
 
-disconnectedIssues :: Map Text Jd.Node -> Set Text -> [OrdIssue]
+disconnectedIssues :: Map Text Jv1.Node -> Set Text -> [OrdIssue]
 disconnectedIssues mapping seen =
   let rest = [(eid, node) | (eid, node) <- Mp.toAscList mapping, St.notMember eid seen]
       hasExtraRoot = any (isNothing . parentOf . snd) rest
@@ -119,7 +119,7 @@ disconnectedIssues mapping seen =
         ]
   in rootIssues <> parentIssues
 
-walk :: Map Text Jd.Node -> Maybe Text -> Int32 -> Text -> WalkSt -> WalkSt
+walk :: Map Text Jv1.Node -> Maybe Text -> Int32 -> Text -> WalkSt -> WalkSt
 walk mapping mbParent childIx eid st
   | St.member eid st.activeWs = addIssue (CycleOI eid) st
   | St.member eid st.seenWs =
@@ -166,14 +166,15 @@ duplicateItems xs = reverse (go xs St.empty St.empty [])
       | St.member y seen = go ys seen (St.insert y dup) (y : acc)
       | otherwise = go ys (St.insert y seen) dup acc
 
-parentOf :: Jd.Node -> Maybe Text
+
+parentOf :: Jv1.Node -> Maybe Text
 parentOf node = node.parentNd
 
-childrenOf :: Jd.Node -> [Text]
+childrenOf :: Jv1.Node -> [Text]
 childrenOf node = node.childrenNd
 
 
-renderOrdIssues :: Jd.Conversation -> [OrdIssue] -> String
+renderOrdIssues :: Jv1.Conversation -> [OrdIssue] -> String
 renderOrdIssues conversation issues =
   T.unpack . T.unlines $
     [ "@[renderOrdIssues] invalid node ordering"

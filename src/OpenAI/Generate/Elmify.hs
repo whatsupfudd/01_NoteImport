@@ -47,7 +47,7 @@ import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as TxS
 
 
-import OpenAI.Deserialize.Discussion
+import OpenAI.Discussion.Deserialize.Discussion
   ( DiscussionDb(..)
   , MessageDb(..)
   , MessageKindDb(..)
@@ -58,7 +58,7 @@ import OpenAI.Deserialize.Discussion
   , RefDb(..)
   , IssueDb(..)
   )
-import qualified OpenAI.Deserialize.Discussion as InO
+import qualified OpenAI.Discussion.Deserialize.Discussion as InO
 import OpenAI.Types (OaiCodeJson(..))
 
 

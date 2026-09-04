@@ -43,7 +43,7 @@ import Network.HTTP.Client (
   )
 import Network.HTTP.Types.Header (hContentType)
 
-import OpenAI.Deserialize.Discussion ( 
+import OpenAI.Discussion.Deserialize.Discussion ( 
     DiscussionDb(..), MessageDb(..), MessageKindDb(..), MessageBodyDb(..)
   , RefDb(..)
   )

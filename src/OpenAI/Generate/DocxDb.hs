@@ -30,10 +30,10 @@ import qualified Text.Pandoc as P
 import qualified Text.Pandoc.Options as Po
 import Text.Pandoc.Walk (walk)
 
-import OpenAI.Parse (sanitizeText)
+import qualified OpenAI.Conversation.Process as Cp
 import OpenAI.Types (OaiCodeJson(..))
 
-import OpenAI.Deserialize.Discussion
+import OpenAI.Discussion.Deserialize.Discussion
   ( DiscussionDb(..)
   , MessageDb(..)
   , MessageKindDb(..)
@@ -217,7 +217,7 @@ subActionsBlocksDb v = fmap concat $ forM (V.toList v) $ \sa ->
                 Left err ->
                   pure
                     [ P.Header 3 P.nullAttr [P.Str "Code"]
-                    , P.Para [P.Str (lang <> " err: " <> sanitizeText (T.pack err))]
+                    , P.Para [P.Str (lang <> " err: " <> Cp.sanitizeText (T.pack err))]
                     ]
                 Right jsonBlock -> do
                   body <- parseMarkdownBlocks jsonBlock.contentOJ

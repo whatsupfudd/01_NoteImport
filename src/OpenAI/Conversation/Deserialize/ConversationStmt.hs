@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Deserialize.ConversationStmt where
+module OpenAI.Conversation.Deserialize.ConversationStmt where
 
 import Data.Aeson (Value)
 import Data.Int (Int32, Int64)

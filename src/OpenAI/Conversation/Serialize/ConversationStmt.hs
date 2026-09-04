@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Serialize.ConversationStmt where
+module OpenAI.Conversation.Serialize.ConversationStmt where
 
 import Data.Aeson (Value)
 import Data.ByteString (ByteString)

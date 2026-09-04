@@ -1,16 +1,17 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module OpenAI.Serialize.ContentStmt where
+module OpenAI.Conversation.Serialize.ContentStmt where
 
 import Data.Aeson (Value)
 import Data.Int (Int32, Int64)
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import Data.Vector (Vector)
 
 import Hasql.Statement (Statement)
 import qualified Hasql.TH as TH
 
-import qualified OpenAI.Serialize.ConversationStmt as St
+import qualified OpenAI.Conversation.Serialize.ConversationStmt as St
 
 
 -- This module provides the canonical content-writer statement API while the
@@ -244,21 +245,21 @@ insertAudioTranscriptionMMPart =
       ($1 :: int8, $2 :: text, $3 :: text, $4 :: text?)
   |]
 
-insertAudioAssetPointerMMPart :: Statement (Int64, Maybe Value, Text, Int64, Text, Maybe Text) Int64
+insertAudioAssetPointerMMPart :: Statement (Int64, Maybe Double, Text, Int64, Text, Maybe Text) Int64
 insertAudioAssetPointerMMPart =
   [TH.singletonStatement|
     insert into oai.audio_asset_pointer_mmpart
       (mmpart_fk, expiry_datetime, asset_pointer, size_bytes, format, tool_audio_direction)
     values
-      ($1 :: int8, $2 :: jsonb?, $3 :: text, $4 :: int8, $5 :: text, $6 :: text?)
+      ($1 :: int8, $2 :: float8?, $3 :: text, $4 :: int8, $5 :: text, $6 :: text?)
     returning uid :: int8
   |]
 
 insertAudioMetadata :: Statement
   ( Int64
   , Int32
-  , Maybe Value
-  , Maybe Value
+  , Maybe Double
+  , Maybe Double
   , Maybe Value
   , Maybe Value
   , Maybe Value
@@ -277,18 +278,18 @@ insertAudioMetadata =
        word_transcription, start_stamp, end_stamp)
     values
       ($1 :: int8, $2 :: int4,
-       $3 :: jsonb?, $4 :: jsonb?, $5 :: jsonb?,
+       $3 :: float8?, $4 :: float8?, $5 :: jsonb?,
        $6 :: jsonb?, $7 :: jsonb?, $8 :: jsonb?,
        $9 :: jsonb?, $10 :: float8, $11 :: float8)
   |]
 
-insertRealTimeUserAVMMPart :: Statement (Int64, Maybe Value, Maybe Value, Maybe Value, Maybe Double) Int64
+insertRealTimeUserAVMMPart :: Statement (Int64, Maybe Double, Maybe Value, Maybe Value, Maybe Double) Int64
 insertRealTimeUserAVMMPart =
   [TH.singletonStatement|
     insert into oai.real_time_user_av_mmpart
       (mmpart_fk, expiry_datetime, frames_asset_pointers, video_container_asset_pointer, audio_start_timestamp)
     values
-      ($1 :: int8, $2 :: jsonb?, $3 :: jsonb?, $4 :: jsonb?, $5 :: float8?)
+      ($1 :: int8, $2 :: float8?, $3 :: jsonb?, $4 :: jsonb?, $5 :: float8?)
     returning uid :: int8
   |]
 
@@ -331,20 +332,20 @@ insertTextPart = insertTextMMPart
 insertAudioTransPart :: Statement (Int64, Text, Text, Maybe Text) ()
 insertAudioTransPart = insertAudioTranscriptionMMPart
 
-insertAudioAssetPart :: Statement (Int64, Maybe Value, Text, Int64, Text, Maybe Text) Int64
+insertAudioAssetPart :: Statement (Int64, Maybe Double, Text, Int64, Text, Maybe Text) Int64
 insertAudioAssetPart = insertAudioAssetPointerMMPart
 
 insertImageAssetPart :: Statement (Int64, Text, Int64, Int32, Int32, Maybe Value) Int64
 insertImageAssetPart = insertImageAssetPointerMMPart
 
-insertRealtimeAvPart :: Statement (Int64, Maybe Value, Maybe Value, Maybe Value, Maybe Double) Int64
+insertRealtimeAvPart :: Statement (Int64, Maybe Double, Maybe Value, Maybe Value, Maybe Double) Int64
 insertRealtimeAvPart = insertRealTimeUserAVMMPart
 
 insertImageMeta :: Statement (Int64, Maybe Value, Maybe Int32, Maybe Int32, Maybe Value, Maybe Value, Maybe Value, Maybe Value,
       Bool, Maybe Value, Maybe Value, Maybe Value) Int64
 insertImageMeta = insertImageMetadata
 
-insertAudioMeta :: Statement (Int64, Int32, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value,
+insertAudioMeta :: Statement (Int64, Int32, Maybe Double, Maybe Double, Maybe Value, Maybe Value, Maybe Value, Maybe Value,
       Maybe Value, Double, Double) ()
 insertAudioMeta = insertAudioMetadata
 

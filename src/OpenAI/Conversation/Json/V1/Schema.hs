@@ -1,16 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
-module OpenAI.Json.V1 where
+module OpenAI.Conversation.Json.V1.Schema where
 
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as Mp
+import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Text as T
-
-import System.Environment (getArgs)
 
 import Data.Aeson
 import Data.Aeson.Types (Value, Object, Parser)
@@ -18,16 +15,17 @@ import qualified Data.Aeson.KeyMap as Km
 
 import GHC.Generics (Generic)
 
-import OpenAI.Json.Utils
+import OpenAI.Conversation.Json.Utils (objectToMapV1)
+import OpenAI.Conversation.Json.MsgSchema (Message (..))
 
 
 data Conversation = Conversation {
   titleCv :: Text,
-  createTimeCv :: Double,
-  updateTimeCv :: Double,
+  createTimeCv :: Scientific,
+  updateTimeCv :: Scientific,
   mappingCv :: Mp.Map Text Node,
   convIdCv :: Text
-} deriving (Show, Generic, ToJSON)
+} deriving (Show, Generic)
 
 instance FromJSON Conversation where
   parseJSON = withObject "Conversation" $ \o ->
@@ -44,7 +42,7 @@ data Node = Node {
   messageNd :: Maybe Message,
   parentNd :: Maybe Text,
   childrenNd :: [Text]
-} deriving (Show, Generic, ToJSON)
+} deriving (Show, Generic)
 
 instance FromJSON Node where
   parseJSON = withObject "Node" $ \o -> Node
@@ -53,16 +51,16 @@ instance FromJSON Node where
     <*> o .:? "parent"
     <*> o .: "children"
 
-
+{-
 data Message = Message {
   idMsg :: Text,
   authorMsg :: Author,
-  createTimeMsg :: Maybe Double,
-  updateTimeMsg :: Maybe Double,
+  createTimeMsg :: Maybe Scientific,
+  updateTimeMsg :: Maybe Scientific,
   contentMsg :: Content,
   statusMsg :: Text,
   endTurnMsg :: Maybe Bool,
-  weightMsg :: Double,
+  weightMsg :: Scientific,
   metadataMsg :: Mp.Map Text Value,
   recipientMsg :: Text,
   channelMsg :: Maybe Text
@@ -388,3 +386,4 @@ instance FromJSON Thought where
     <*> o .:? "chunks"
     <*> o .:? "finished"
 
+-}
