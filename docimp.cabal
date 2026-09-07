@@ -51,6 +51,7 @@ library
       OpenAI.Conversation.Deserialize.ConversationStmt
       OpenAI.Conversation.Json.MsgSchema
       OpenAI.Conversation.Json.Node
+      OpenAI.Conversation.Json.Node.Build
       OpenAI.Conversation.Json.Node.Order
       OpenAI.Conversation.Json.Node.Parse
       OpenAI.Conversation.Json.Reader

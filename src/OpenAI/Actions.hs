@@ -38,6 +38,8 @@ import qualified OpenAI.Import.Report as Ir
 import qualified OpenAI.Import.Types as Im
 import qualified OpenAI.Conversation.Json.Reader as Jr
 import qualified OpenAI.Conversation.Json.Schema as Js
+import qualified OpenAI.Conversation.Json.Node as Nd
+import qualified OpenAI.Conversation.Json.Node.Build as Bd
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Process as Op
 import qualified OpenAI.ProjFetcher as Pf
@@ -46,6 +48,8 @@ import qualified OpenAI.Discussion.Serialize.Discussion as Sdc
 import qualified OpenAI.Discussion.Deserialize.Discussion as Ddc
 import qualified OpenAI.Summarisation as Sm
 import qualified OpenAI.Utils as Utl
+import Notion.Fetch (TextSpan(content))
+
 
 
 data ItemIdent
@@ -90,7 +94,7 @@ parseJson jsonFile exportB = do
         -- putStrLn $ "@[parseJson] conversation: " <> T.unpack conv.oaiIdCv
         pure . Right $ [(conv, conv.oaiIdCv)]
 
-
+{-
 parseBrowserJson :: [FilePath] -> IO (Either String [(Js.Conversation, Text)])
 parseBrowserJson jsonFiles =
   case jsonFiles of
@@ -114,13 +118,24 @@ parseBrowserJson jsonFiles =
             (errs, _) -> pure $ Left $ "@[parseBrowserJson] " <> show errs
         _ -> pure $ Left "@[parseBrowserJson] unexpected conversation format"
 
-
 parseFollowJson :: FilePath -> IO (Either String Js.FollowConv)
 parseFollowJson jsonFile = do
   jsonContent <- Bsl.readFile jsonFile
   case Jr.parseFollow jsonContent of
     Left errMsg -> pure $ Left errMsg
     Right followConv -> pure $ Right followConv
+
+-}
+
+parseBrowserJson :: [FilePath] -> IO (Either String [(Js.Conversation, Text)])
+parseBrowserJson jsonFiles =
+  case jsonFiles of
+    [] -> pure $ Left "@[parseBrowserJson] no json files provided"
+    _ -> do
+      jsonContents <- mapM Bsl.readFile jsonFiles
+      pure $ case Jr.parsePages jsonContents of
+        Left err -> Left err
+        Right conv -> Right [(conv, conv.oaiIdCv)]
 
 
 printJson :: Opt.OaiPrintOpts -> Opt.TargetsOpts -> IO ()
@@ -165,7 +180,14 @@ storeJsonAsConversations storeOpts targetsOpts rtOpts = case storeOpts.followFil
     rezA <- parseBrowserJson $ storeOpts.jsonFileST : followFiles
     case rezA of
       Left err -> putStrLn $ "Parsing failed: " <> err
-      Right conversations -> do
+      Right rawConvs ->
+        let
+          conversations = map (\(conv, oaiID) ->
+              case Bd.buildNodeMapCv conv of
+                Left errs -> error $ "@[storeJsonAsConversations] buildNodeMapCv err: " <> show errs
+                Right conv -> (conv { Js.nodeMapCv = Nd.buildChildrenNd conv.nodeMapCv }, oaiID)
+            ) rawConvs
+        in do
         printConvInfo conversations
         let
           (targetConvs, missingTargets) = selectJsonTargets conversations targetsOpts
@@ -173,8 +195,61 @@ storeJsonAsConversations storeOpts targetsOpts rtOpts = case storeOpts.followFil
 
 
 printConvInfo :: [(Js.Conversation, Text)] -> IO ()
-printConvInfo conversations = do
-  mapM_ (\(conv, oaiID) -> putStrLn $ "@[printConvInfo] conversation: " <> T.unpack oaiID <> ", msgs: " <> show (length conv.messagesCv)) conversations
+printConvInfo conversations =
+  mapM_ detailAboutConversation (map fst conversations)
+
+
+detailAboutConversation :: Js.Conversation -> IO ()
+detailAboutConversation conv = do
+  putStrLn $ "@[detailAboutConversation] conversation: " <> T.unpack conv.oaiIdCv <> ", msgs: " <> show (length conv.messagesCv)
+  putStrLn $ "@[detailAboutConversation] nodes: " <> show (length conv.nodeMapCv)
+  mapM_ detailAboutNode conv.nodeMapCv
+
+
+detailAboutNode :: Nd.Node -> IO ()
+detailAboutNode node =
+  case node.messageNd of
+    Just aMsg -> detailAboutMessage aMsg
+    Nothing -> pure ()
+
+
+detailAboutMessage :: Js.Message -> IO ()
+detailAboutMessage msg =
+  case msg.authorMsg.roleAu of
+    "user" -> putStrLn $ "@[detailAboutMessage] user: " <> contentName msg.contentMsg
+    _ -> pure ()
+
+
+{-
+Content kinds:
+    CodeCT CodePL
+  | ExecutionOutputCT ExecutionOutputPL
+  | MultimodalTextCT MultimodalTextPL  -- V1
+  | ModelEditableContextCT ModelEditableContextPL
+  | ReasoningRecapCT ReasoningRecapPL
+  | SystemErrorCT SystemErrorPL  -- V1
+  | TetherBrowsingDisplayCT TetherBrowsingDisplayPL
+  | TetherQuoteCT TetherQuotePL
+  | TextCT TextPL
+  | ThoughtsCT ThoughtsPL
+  | OtherCT OtherPL
+-}
+contentName :: Js.Content -> String
+contentName content =
+  case content of
+    Js.TextCT _ -> "text"
+    Js.CodeCT _ -> "code"
+    Js.ExecutionOutputCT _ -> "execution output"
+    Js.MultimodalTextCT _ -> "multimodal text"
+    Js.ModelEditableContextCT _ -> "model editable context"
+    Js.ReasoningRecapCT _ -> "reasoning recap"
+    Js.SystemErrorCT _ -> "system error"
+    Js.TetherBrowsingDisplayCT _ -> "tether browsing display"
+    Js.TetherQuoteCT _ -> "tether quote"
+    Js.ThoughtsCT _ -> "thoughts"
+    Js.OtherCT _ -> "other"
+    _ -> "@[contentName] type: " <> show content
+
 
 sourceFromStore :: Opt.OaiStoreOpts -> Im.Source
 sourceFromStore storeOpts =

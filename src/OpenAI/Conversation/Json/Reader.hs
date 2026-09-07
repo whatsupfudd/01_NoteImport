@@ -3,11 +3,14 @@
 module OpenAI.Conversation.Json.Reader (
   VersionJson(..)
   , parse, parseFromValue, parseFollow, mergeBrowseJson
-  , module OpenAI.Conversation.Json.Schema
+  , parsePages
+  , module Js
 )
 where
 
-import qualified Data.ByteString.Lazy as Bs
+import qualified Data.ByteString.Lazy as Bsl
+import Data.Bifunctor (first)
+import Data.Text (Text)
 
 import qualified Data.Aeson as Ae
 import qualified Data.Aeson.KeyMap as Km
@@ -15,14 +18,14 @@ import qualified Data.Aeson.Types as Aet
 
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Json.V1.Convert as Jc
-import OpenAI.Conversation.Json.Schema
-import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Json.Schema as Js
 import OpenAI.Conversation.Json.Types
+import qualified OpenAI.Conversation.Json.Node.Build as Nb
 
 
 data MixedConversation =
   V1Cv Jv1.Conversation
-  | V2Cv Conversation
+  | V2Cv Js.Conversation
 
 
 parseMixed :: Ae.Value -> Aet.Parser MixedConversation
@@ -36,16 +39,22 @@ parseMixed =
     )
 
 
-parse :: Bs.ByteString -> Either String Conversation
+parse :: Bsl.ByteString -> Either String Js.Conversation
 parse jsonContent = do
-  case Ae.eitherDecode jsonContent :: Either String Ae.Value of
-    Left err -> Left err
-    Right rawJson ->
-      parseFromValue rawJson
+  parseRaw jsonContent >>= finalize
 
 
-parseFromValue :: Ae.Value -> Either String Conversation
-parseFromValue rawJson = do
+parseRaw :: Bsl.ByteString -> Either String Js.Conversation
+parseRaw jsonContent =
+  Ae.eitherDecode jsonContent >>= parseFromValueRaw
+
+
+parseFromValue :: Ae.Value -> Either String Js.Conversation
+parseFromValue rawJson = parseFromValueRaw rawJson >>= finalize
+
+
+parseFromValueRaw :: Ae.Value -> Either String Js.Conversation
+parseFromValueRaw rawJson =
   case Aet.parseEither parseMixed rawJson :: Either String MixedConversation of
     Left err -> Left err
     Right mxConv -> case mxConv of
@@ -53,17 +62,51 @@ parseFromValue rawJson = do
       V2Cv conv -> Right conv
 
 
-parseFollow :: Bs.ByteString -> Either String FollowConv
-parseFollow jsonContent = do
-  Ae.eitherDecode jsonContent :: Either String FollowConv
+finalize :: Js.Conversation -> Either String Js.Conversation
+finalize = first Nb.renderIssuesNB . Nb.buildNodeMapCv
 
-mergeBrowseJson :: Conversation -> [FollowConv] -> Either String Conversation
+
+parseFollow :: Bsl.ByteString -> Either String Js.FollowConv
+parseFollow jsonContent = do
+  Ae.eitherDecode jsonContent :: Either String Js.FollowConv
+
+mergeBrowseJson :: Js.Conversation -> [Js.FollowConv] -> Either String Js.Conversation
 mergeBrowseJson conv followConvs = do
   Right $ foldl mergeFollow conv followConvs
   where
-  mergeFollow :: Conversation -> FollowConv -> Conversation
+  mergeFollow :: Js.Conversation -> Js.FollowConv -> Js.Conversation
   mergeFollow accum aFollow =
-    accum { messagesCv = accum.messagesCv <> aFollow.messagesCv 
-        , safeUrlsCv = accum.safeUrlsCv <> aFollow.safeUrlsCv
-        , blockedUrlsCv = accum.blockedUrlsCv <> aFollow.blockedUrlsCv      
+    accum { Js.messagesCv = accum.messagesCv <> aFollow.messagesCv 
+        , Js.safeUrlsCv = accum.safeUrlsCv <> aFollow.safeUrlsCv
+        , Js.blockedUrlsCv = accum.blockedUrlsCv <> aFollow.blockedUrlsCv      
       }
+
+
+-- Page management:
+data PageJson = 
+    ConversationPg Js.Conversation
+  | FollowPg Js.FollowConv
+
+
+parsePages :: [Bsl.ByteString] -> Either String Js.Conversation
+parsePages jsonContents = do
+  pages <- traverse parsePageRaw jsonContents
+  let
+    conversations = [conv | ConversationPg conv <- pages]
+    follows = [page | FollowPg page <- pages]
+
+  case conversations of
+    [conv] -> case conv.versionJsonCv of
+      V2vj -> mergeBrowseJson conv follows
+      V1vj -> Left "@[parsePages] expected a V2 conversation envelope"
+    [] -> Left "@[parsePages] no full conversation envelope found"
+    _ -> Left "@[parsePages] multiple full conversation envelopes found"
+
+
+parsePageRaw :: Bsl.ByteString -> Either String PageJson
+parsePageRaw jsonContent = do
+  value <- Ae.eitherDecode jsonContent
+  case value of
+    Ae.Object object | Km.member "conversation_id" object ->
+      ConversationPg <$> parseFromValueRaw value
+    _ -> FollowPg <$> Aet.parseEither Ae.parseJSON value

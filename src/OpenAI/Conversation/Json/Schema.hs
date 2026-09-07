@@ -34,9 +34,9 @@ data Conversation = Conversation {
   , oaiIdCv :: Text
   , moderationResultsCv :: [Value]
   , pluginIdsCv :: Maybe Value
-  , templateIdCv :: Text
-  , gizmoIdCv :: Text
-  , gizmoTypeCv :: Text
+  , templateIdCv :: Maybe Text
+  , gizmoIdCv :: Maybe Text
+  , gizmoTypeCv :: Maybe Text
   , isArchivedCv :: Bool
   , isStarredCv :: Maybe Value
   , safeUrlsCv :: [Text]
@@ -56,7 +56,7 @@ data Conversation = Conversation {
   , sugarItemVisibleCv :: Bool
   , pinnedTimeCv :: Maybe Value
   , isStudyModeCv :: Bool
-  , ownerCv :: Owner
+  , ownerCv :: Maybe Owner
   , messagesCv :: [Message]
   , currentNodeCv :: Text
   , pageInfoCv :: PageInfo
@@ -72,34 +72,34 @@ instance FromJSON Conversation where
       <*> o .: "update_time"
       <*> o .: "conversation_id"
       <*> o .: "moderation_results"
-      <*> o .: "plugin_ids"
-      <*> o .: "conversation_template_id"
-      <*> o .: "gizmo_id"
-      <*> o .: "gizmo_type"
+      <*> o .:? "plugin_ids"
+      <*> o .:? "conversation_template_id"
+      <*> o .:? "gizmo_id"
+      <*> o .:? "gizmo_type"
       <*> o .: "is_archived"
-      <*> o .: "is_starred"
+      <*> o .:? "is_starred"
       <*> o .: "safe_urls"
       <*> o .: "blocked_urls"
       <*> o .: "default_model_slug"
-      <*> o .: "atlas_mode_enabled"
+      <*> o .:? "atlas_mode_enabled"
       <*> o .: "conversation_origin"
-      <*> o .: "is_read_only"
-      <*> o .: "voice"
-      <*> o .: "async_status"
+      <*> o .:? "is_read_only"
+      <*> o .:? "voice"
+      <*> o .:? "async_status"
       <*> o .: "disabled_tool_ids"
       <*> o .: "is_temporary_chat"
       <*> o .: "is_do_not_remember"
       <*> o .: "memory_scope"
       <*> o .: "context_scopes"
-      <*> o .: "sugar_item_id"
+      <*> o .:? "sugar_item_id"
       <*> o .: "sugar_item_visible"
-      <*> o .: "pinned_time"
+      <*> o .:? "pinned_time"
       <*> o .: "is_study_mode"
-      <*> o .: "owner"
+      <*> o .:? "owner"
       <*> o .: "messages"
       <*> o .: "current_node"
       <*> o .: "page_info"
-      <*> o .: "context_truncation_continuation"
+      <*> o .:? "context_truncation_continuation"
       <*> pure Mp.empty
  
 

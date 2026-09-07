@@ -17,8 +17,7 @@ import GHC.Generics (Generic)
 
 import OpenAI.Conversation.Json.Utils (objectToMapV1)
 import OpenAI.Conversation.Json.MsgSchema (Message (..))
-import OpenAI.Conversation.Json.Node (Node)
-
+import OpenAI.Conversation.Json.Node (Node, buildChildrenNd)
 
 data Conversation = Conversation {
   titleCv :: Text,
@@ -34,6 +33,6 @@ instance FromJSON Conversation where
       <$> o .: "title"
       <*> o .: "create_time"
       <*> o .: "update_time"
-      <*> o .: "mapping"
+      <*> (buildChildrenNd <$> o .: "mapping")
       <*> o .: "conversation_id"
 

@@ -60,9 +60,7 @@ updateTx conversation sourceKey = do
     Just (uidConv, _, _) -> do
       dbSnapRez <- SnapDb.load uidConv
       let
-        -- TODO: fix
-        fakeV1 = currentToV1 conversation
-        jsonSnapRez = SnapJson.build fakeV1
+        jsonSnapRez = SnapJson.build conversation
       case (dbSnapRez, jsonSnapRez) of
         (Left conflicts, _) -> pure . Left $ renderConflicts "database snapshot" conflicts
         (_, Left conflicts) -> pure . Left $ renderConflicts "JSON snapshot" conflicts
@@ -74,7 +72,7 @@ updateTx conversation sourceKey = do
                 Left conflicts -> pure . Left $ renderConflicts "delta validation" conflicts
                 Right delta -> do
                   -- TODO: fix
-                  applyRez <- Apply.apply sourceKey fakeV1 jsonSnap delta
+                  applyRez <- Apply.apply sourceKey conversation jsonSnap delta
                   case applyRez of
                     Left conflicts -> do
                       Htx.condemn

@@ -254,11 +254,11 @@ messageFromRow contentsByMessage (_, uidMsg, eidMsg, timeCreate, timeUpdate, sta
   Cv.MessageDb {
       Cv.uidMsg = uidMsg
       , Cv.eidMsg = eidMsg
-      , Cv.createTimeMsg = fromMaybe 0 . Ut.safeScientific <$> timeCreate
-      , Cv.updateTimeMsg = fromMaybe 0 . Ut.safeScientific <$> timeUpdate
+      , Cv.createTimeMsg = Ut.safeScientific =<< timeCreate
+      , Cv.updateTimeMsg = Ut.safeScientific =<< timeUpdate
       , Cv.statusMsg = status
       , Cv.endTurnMsg = endTurn
-      , Cv.weightMsg = Ut.safeScientific weight
+      , Cv.weightMsg = Ut.safeScientific =<< weight
       , Cv.metadataMsg = metadata
       , Cv.recipientMsg = recipient
       , Cv.channelMsg = channel

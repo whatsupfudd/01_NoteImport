@@ -76,13 +76,15 @@ useTx pool transaction =
 
 addConversation :: Hp.Pool -> Jv1.Conversation -> IO (Either Hp.UsageError (Either String Int64))
 addConversation pool conversation =
-  fmap (fmap (fmap (.uidConv))) $ addConversationR pool conversation
+  fmap (fmap (.uidConv)) <$> addConversationR pool conversation
 
 
 addConversationR :: Hp.Pool -> Jv1.Conversation -> IO (Either Hp.UsageError (Either String ReportRawAdd))
 addConversationR pool conversation = do
+  {-
   putStrLn . T.unpack $ "@[addConversationR] node map: " 
     <> T.intercalate "\n, " (map (\(eid, node) -> "eid: " <> eid <> ", parentEid: " <> fromMaybe "<none>" node.parentNd) (Mp.toList conversation.nodeMapCv))
+  -}
 
   case Oor.buildNodeOrd conversation.nodeMapCv of
     Left issues ->

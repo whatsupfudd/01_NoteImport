@@ -112,28 +112,19 @@ compute policy dbSnap jsSnap
 planMeta :: PolicyD -> Sn.ConvSnap -> Sn.ConvSnap -> MetaPlan
 planMeta policy dbSnap jsSnap =
   case Mt.matchMeta dbSnap jsSnap of
-    Ty.KeepMeta ->
-      MetaPlan Ty.KeepMeta [] []
-
-    action@Ty.UpdateMeta{} ->
-      MetaPlan action [] []
-
+    Ty.KeepMeta -> MetaPlan Ty.KeepMeta [] []
+    action@Ty.UpdateMeta{} -> MetaPlan action [] []
     Ty.RejectOlderMeta timeDb timeJs
-      | policy.allowOlderD ->
-          MetaPlan
-            (Ty.UpdateMeta dbSnap.titleConv jsSnap.titleConv timeDb timeJs)
-            []
+      | policy.allowOlderD -> MetaPlan
+            (Ty.UpdateMeta dbSnap.titleConv jsSnap.titleConv timeDb timeJs) []
             ["older conversation metadata accepted by delta policy"]
-
-      | otherwise ->
-          MetaPlan
-            (Ty.RejectOlderMeta timeDb timeJs)
-            [Ty.OlderJsonC]
+      | otherwise -> MetaPlan
+            (Ty.RejectOlderMeta timeDb timeJs) [Ty.OlderJsonC]
             ["JSON conversation update_time is older than the stored conversation"]
 
 
-planNodes :: PolicyD -> Mp.Map Text Sn.NodeSnap -> Mp.Map Text Sn.NodeSnap
-      -> [Sn.NodeSnap] -> [Sn.NodeSnap] -> [NodePlan]
+planNodes :: PolicyD -> Mp.Map Text Sn.NodeSnap -> Mp.Map Text Sn.NodeSnap -> [Sn.NodeSnap] -> [Sn.NodeSnap]
+      -> [NodePlan]
 planNodes policy dbNodes jsNodes dbOrdered jsOrdered =
   let
     jsAsc = sortNodes jsOrdered
@@ -180,29 +171,20 @@ validateAddedParent dbNodes jsNodes jsNode =
   case jsNode.eidParent of
     Nothing
       | Mp.null dbNodes -> Nothing
-      | otherwise -> Just $ Ty.BrokenShapeC
-          ("new node would introduce another root: " <> jsNode.eidNode)
-
+      | otherwise -> Just $ Ty.BrokenShapeC ("new node would introduce another root: " <> jsNode.eidNode)
     Just eidParent
       | eidParent == jsNode.eidNode ->
           Just $ Ty.BrokenShapeC ("node is its own parent: " <> jsNode.eidNode)
-
       | not (Mp.member eidParent jsNodes) ->
-          Just $ Ty.BrokenShapeC
-            ("JSON node references a missing parent: " <> jsNode.eidNode <> " -> " <> eidParent)
-
-      | Mp.member eidParent dbNodes ->
-          Nothing
-
+          Just $ Ty.BrokenShapeC ("JSON node references a missing parent: " <> jsNode.eidNode <> " -> " <> eidParent)
+      | Mp.member eidParent dbNodes -> Nothing
       | otherwise ->
           case Mp.lookup eidParent jsNodes of
             Just parent
               | parent.seqPre < jsNode.seqPre -> Nothing
-              | otherwise -> Just $ Ty.BrokenShapeC
-                  ("new parent is not ordered before its child: " <> eidParent
+              | otherwise -> Just $ Ty.BrokenShapeC ("new parent is not ordered before its child: " <> eidParent
                     <> " -> " <> jsNode.eidNode)
-            Nothing ->
-              Just $ Ty.MissingDbNodeC eidParent
+            Nothing -> Just $ Ty.MissingDbNodeC eidParent
 
 
 planShared :: PolicyD -> Mp.Map Text Sn.NodeSnap -> Mp.Map Text Sn.NodeSnap
@@ -336,9 +318,8 @@ planMessage policy dbNode jsNode =
     (Just dbMsg, Just jsMsg)
       | dbMsg.eidMsg /= jsMsg.eidMsg ->
           let
-            conflict = Ty.BrokenShapeC
-              ("message EID changed on node " <> dbNode.eidNode <> ": DB="
-                <> dbMsg.eidMsg <> ", JSON=" <> jsMsg.eidMsg)
+            conflict = Ty.BrokenShapeC $ "message EID changed on node " <> dbNode.eidNode <> ": DB="
+                <> dbMsg.eidMsg <> ", JSON=" <> jsMsg.eidMsg <> "| dbMsg: " <> (T.pack . show) dbMsg <> ", jsMsg: " <> (T.pack . show) jsMsg
           in
           MessagePlan
             (Just $ Ty.ConflictMA (refMsgDb dbMsg) conflict)

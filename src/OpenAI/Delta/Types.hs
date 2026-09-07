@@ -147,6 +147,7 @@ data Conflict =
   | BranchRewriteC
   | DuplicateEidC Text
   | BrokenShapeC Text
+  | DebugShapC Text Text
   deriving stock (Eq, Show)
 
 

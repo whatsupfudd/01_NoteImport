@@ -14,13 +14,13 @@ type ConversationRow = (Int64, Text, Text, Double, Double)
 type ConvKeyRow = (Int64, Text, Text)
 type NodeRow = (Int64, Text, Maybe Int64, Int32, Int32, Int32)
 type MessageRow =
-  ( Int64, Int64, Text, Maybe Double, Maybe Double, Text, Maybe Bool, Double, Value, Text, Maybe Text
+  ( Int64, Int64, Text, Maybe Double, Maybe Double, Text, Maybe Bool, Maybe Double, Value, Text, Maybe Text
   , Int64, Text, Maybe Text, Value
   )
 type ContentRow = (Int64, Int64, Text)
 type NodeSnapRow = (Int64, Text, Maybe Int64, Maybe Text, Int32, Int32, Int32)
 type MsgSnapRow =
-  ( Int64, Int64, Text, Maybe Double, Maybe Double, Text, Maybe Bool, Double, Value, Text, Maybe Text, Int32
+  ( Int64, Int64, Text, Maybe Double, Maybe Double, Text, Maybe Bool, Maybe Double, Value, Text, Maybe Text, Int32
   )
 
 type ContentSnapRow = (Int64, Int64, Text, Int32, Value)
@@ -238,7 +238,7 @@ selectMessagesWithAuthor =
       m.update_time :: float8?,
       m.status :: text,
       m.end_turn :: bool?,
-      m.weight :: float8,
+      m.weight :: float8?,
       m.metadata :: jsonb,
       m.recipient :: text,
       m.channel :: text?,
@@ -279,7 +279,7 @@ selectMsgSnaps =
       m.update_time :: float8?,
       m.status :: text,
       m.end_turn :: bool?,
-      m.weight :: float8,
+      m.weight :: float8?,
       m.metadata :: jsonb,
       m.recipient :: text,
       m.channel :: text?,

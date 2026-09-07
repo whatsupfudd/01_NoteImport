@@ -12,16 +12,16 @@ module OpenAI.Conversation.Json.Node.Order
 import Data.Int (Int32)
 import Data.List (foldl', nub)
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Mp
 import Data.Maybe (isNothing)
 import Data.Set (Set)
+import qualified Data.Set as St
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Map.Strict as Mp
-import qualified Data.Set as St
-import qualified Data.Text as Tx
 
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Json.Node as Nd
+import Notion.Fetch (Block(children))
 
 
 data NodeOrd = NodeOrd {
@@ -45,7 +45,7 @@ data OrdIssue =
   deriving stock (Eq, Show)
 
 specialRootEid :: Text
-specialRootEid = Tx.pack "client-created-root"
+specialRootEid = T.pack "client-created-root"
 
 data WalkSt = WalkSt {
     nextSeqWs :: Int32
@@ -67,7 +67,7 @@ buildNodeOrd mapping =
         issuesBranch = branchIssues mapping
         initState = WalkSt { nextSeqWs = 0, ordsRevWs = [], seenWs = St.empty, activeWs = St.empty, issuesWs = [] }
         walkRez = scanNodes mapping Nothing 0 eidRoot initState
-        dbgWalkRez = walkRez { issuesWs = [DebugInfo "root" eidRoot, DebugInfo "state" (T.pack $ show walkRez)] <> walkRez.issuesWs }
+        dbgWalkRez = walkRez -- { issuesWs = [DebugInfo "root" eidRoot] <> walkRez.issuesWs } -- , DebugInfo "state" (T.pack $ show walkRez)
         issuesRest = disconnectedIssues mapping dbgWalkRez.seenWs
         issuesAll = nub (issuesBase <> dbgWalkRez.issuesWs <> issuesRest)
       in
@@ -144,7 +144,7 @@ scanNodes mapping mbParent childIx eid st
                 }
           st1 = st { nextSeqWs = curSeq + 1, ordsRevWs = ord : st.ordsRevWs
                   , seenWs = St.insert eid st.seenWs, activeWs = St.insert eid st.activeWs
-                  , issuesWs = [DebugInfo "children" (T.pack $ show node.childrenNd)] <> st.issuesWs
+                  -- , issuesWs = [DebugInfo ("eid: " <> eid <> ", children") (T.pack $ show node.childrenNd)] <> st.issuesWs
                 }
           st2 = foldl' (\acc (ix, eidChild) -> scanNodes mapping (Just eid) ix eidChild acc) st1 (zip [0 ..] node.childrenNd)
         in
@@ -168,7 +168,7 @@ duplicateItems xs = reverse (go xs St.empty St.empty [])
 
 renderOrdIssues :: Jv1.Conversation -> [OrdIssue] -> String
 renderOrdIssues conversation issues =
-  T.unpack $ "@[renderOrdIssues] invalid node ordering\ntitle: " <> conversation.titleCv
+  T.unpack $ "@[renderOrdIssues] node issues.\ntitle: " <> conversation.titleCv
       <> "\neid: " <> conversation.convIdCv <> " => \n" <> T.intercalate "\n" (map renderOrdIssue issues)
 
 

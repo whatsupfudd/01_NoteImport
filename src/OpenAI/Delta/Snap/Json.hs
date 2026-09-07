@@ -19,13 +19,13 @@ import qualified OpenAI.Delta.Hash as Dh
 import OpenAI.Delta.Snap (ContentSnap(..), ConvSnap(..), MsgSnap(..), NodeSnap(..))
 import OpenAI.Delta.Types (Conflict(..), Hash(..))
 import qualified OpenAI.Id as Oid
-import qualified OpenAI.Conversation.Json.Schema as Jd
+import qualified OpenAI.Conversation.Json.Schema as Js
 import qualified OpenAI.Conversation.Json.Node.Order as Oor
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Json.Node as Nd
 
 
-build :: Jv1.Conversation -> Either [Conflict] ConvSnap
+build :: Js.Conversation -> Either [Conflict] ConvSnap
 build conversation =
   let
     mapping = conversation.nodeMapCv
@@ -42,7 +42,7 @@ build conversation =
     (_, Right orders) -> do
       nodes <- traverse (nodeFromOrder mapping) orders
       pure ConvSnap {
-          eidConv = conversation.convIdCv
+          eidConv = conversation.oaiIdCv
           , uidConv = Nothing
           , titleConv = conversation.titleCv
           , timeCreateCv = conversation.createTimeCv
@@ -51,9 +51,9 @@ build conversation =
         }
 
 
-validateConversation :: Jv1.Conversation -> [Conflict]
+validateConversation :: Js.Conversation -> [Conflict]
 validateConversation conversation =
-  validateConvEid conversation.convIdCv
+  validateConvEid conversation.oaiIdCv
     -- <> validateTime "conversation create_time" conversation.createTimeCv
     -- <> validateTime "conversation update_time" conversation.updateTimeCv
     <> validateMapping conversation.nodeMapCv
@@ -102,7 +102,7 @@ validateNodeEid eidKey node =
   eidIssues <> mismatchIssues
 
 
-validateMessage :: Text -> Jd.Message -> [Conflict]
+validateMessage :: Text -> Js.Message -> [Conflict]
 validateMessage eidNode message =
   let
     eidIssues =
@@ -118,7 +118,7 @@ validateMessage eidNode message =
   eidIssues <> contentIssues -- <> createIssues <> updateIssues 
 
 
-validateContent :: Text -> Jd.Content -> [Conflict]
+validateContent :: Text -> Js.Content -> [Conflict]
 validateContent eidMsg content =
   case Codec.fromJson content of
     Left issue -> [codecIssueConflict eidMsg content issue]
@@ -196,7 +196,7 @@ nodeFromOrder mapping order =
       pure snap0 {hashNode = Dh.hashNodeDb snap0}
 
 
-messageFromJson :: Jd.Message -> Either [Conflict] MsgSnap
+messageFromJson :: Js.Message -> Either [Conflict] MsgSnap
 messageFromJson message = do
   content <- contentFromJson message.idMsg message.contentMsg
   let
@@ -217,7 +217,7 @@ messageFromJson message = do
   pure snap0 {hashMsg = Dh.hashMsgDb snap0}
 
 
-contentFromJson :: Text -> Jd.Content -> Either [Conflict] ContentSnap
+contentFromJson :: Text -> Js.Content -> Either [Conflict] ContentSnap
 contentFromJson eidMsg content =
   case Codec.fromJson content of
     Left issue -> Left [codecIssueConflict eidMsg content issue]
@@ -236,7 +236,7 @@ contentFromJson eidMsg content =
       Right snap0 {hashContent = Dh.hashContentDb snap0}
 
 
-codecIssueConflict :: Text -> Jd.Content -> Ct.IssueC -> Conflict
+codecIssueConflict :: Text -> Js.Content -> Ct.IssueC -> Conflict
 codecIssueConflict eidMsg content issue =
   BrokenShapeC $
     "invalid " <> Ck.textKC (Ck.kindFromJson content)

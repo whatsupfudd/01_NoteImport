@@ -139,7 +139,7 @@ checkMessageNode nodeUids row
 
 
 buildConversation :: Dst.ConversationRow -> RowsDb -> Htx.Transaction (Either [Conflict] ConvSnap)
-buildConversation (uidConv, eidConv, titleConv, timeCreate, timeUpdate) rows = do
+buildConversation (uidConv, titleConv, eidConv, timeCreate, timeUpdate) rows = do
   messagesE <- buildMessagesByNode rows.messagesRD
   case messagesE of
     Left conflicts -> pure $ Left conflicts
@@ -186,7 +186,7 @@ buildMessage row@(uidMsg, uidNode, eidMsg, timeCreate, timeUpdate, status, endTu
             , timeUpdate = Ut.safeScientific =<< timeUpdate
             , status = status
             , endTurn = endTurn
-            , weight = Ut.safeScientific weight
+            , weight = Ut.safeScientific =<< weight
             , metadata = metadata
             , recipient = recipient
             , channel = channel
