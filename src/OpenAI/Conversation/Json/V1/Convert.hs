@@ -1,17 +1,19 @@
 module OpenAI.Conversation.Json.V1.Convert where
 
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Map.Strict as Mp
 import Data.Text (Text) 
 
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Json.Schema as J
 import qualified OpenAI.Conversation.Json.Types as Jt
+import qualified OpenAI.Conversation.Json.Node as Nd
+
 
 v1ToCurrent :: Jv1.Conversation -> J.Conversation
 v1ToCurrent v1 =
   let
-    messages = v1NodesToMessages v1.mappingCv
+    messages = v1NodesToMessages v1.nodeMapCv
     rezConv = mkDefault
   in
   rezConv {
@@ -20,13 +22,13 @@ v1ToCurrent v1 =
   , J.updateTimeCv = v1.updateTimeCv
   , J.oaiIdCv = v1.convIdCv
   , J.messagesCv = messages
+  , J.nodeMapCv = v1.nodeMapCv
   }
 
 
-v1NodesToMessages :: Mp.Map Text Jv1.Node -> [J.Message]
-v1NodesToMessages nodes =
-  -- TODO.
-  []
+v1NodesToMessages :: Mp.Map Text Nd.Node -> [J.Message]
+v1NodesToMessages =
+  mapMaybe (\(k, node) -> node.messageNd) . Mp.toList
 
 
 mkDefault :: J.Conversation
@@ -66,6 +68,7 @@ mkDefault =
   , J.currentNodeCv = ""
   , J.pageInfoCv = mkDefaultPageInfo
   , J.contextTruncationContinuationCv = Nothing
+  , J.nodeMapCv = Mp.empty
   }
 
 mkDefaultOwner :: J.Owner

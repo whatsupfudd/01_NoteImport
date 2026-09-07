@@ -4,6 +4,7 @@ module OpenAI.Delta.Snap.Json (build) where
 
 import qualified Data.Aeson as Ae
 import qualified Data.ByteString as Bs
+import Data.Maybe (fromMaybe)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Mp
 import Data.Maybe (maybeToList)
@@ -19,14 +20,15 @@ import OpenAI.Delta.Snap (ContentSnap(..), ConvSnap(..), MsgSnap(..), NodeSnap(.
 import OpenAI.Delta.Types (Conflict(..), Hash(..))
 import qualified OpenAI.Id as Oid
 import qualified OpenAI.Conversation.Json.Schema as Jd
-import qualified OpenAI.Conversation.Json.V1.Order as Oor
+import qualified OpenAI.Conversation.Json.Node.Order as Oor
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+import qualified OpenAI.Conversation.Json.Node as Nd
 
 
 build :: Jv1.Conversation -> Either [Conflict] ConvSnap
 build conversation =
   let
-    mapping = conversation.mappingCv
+    mapping = conversation.nodeMapCv
     orderResult = Oor.buildNodeOrd mapping
     validationIssues = validateConversation conversation
     orderIssues =
@@ -54,9 +56,9 @@ validateConversation conversation =
   validateConvEid conversation.convIdCv
     -- <> validateTime "conversation create_time" conversation.createTimeCv
     -- <> validateTime "conversation update_time" conversation.updateTimeCv
-    <> validateMapping conversation.mappingCv
-    <> duplicateNodeIssues conversation.mappingCv
-    <> duplicateMessageIssues conversation.mappingCv
+    <> validateMapping conversation.nodeMapCv
+    <> duplicateNodeIssues conversation.nodeMapCv
+    <> duplicateMessageIssues conversation.nodeMapCv
 
 
 validateConvEid :: Text -> [Conflict]
@@ -66,7 +68,7 @@ validateConvEid eid =
     Right _ -> []
 
 
-validateMapping :: Map Text Jv1.Node -> [Conflict]
+validateMapping :: Map Text Nd.Node -> [Conflict]
 validateMapping mapping =
   concatMap validateEntry $ Mp.toAscList mapping
   where
@@ -83,7 +85,7 @@ validateNodeKey eid =
     Right _ -> []
 
 
-validateNodeEid :: Text -> Jv1.Node -> [Conflict]
+validateNodeEid :: Text -> Nd.Node -> [Conflict]
 validateNodeEid eidKey node =
   let
     eidIssues =
@@ -135,12 +137,12 @@ finite :: Double -> Bool
 finite value = not (isNaN value || isInfinite value)
 
 
-duplicateNodeIssues :: Map Text Jv1.Node -> [Conflict]
+duplicateNodeIssues :: Map Text Nd.Node -> [Conflict]
 duplicateNodeIssues mapping =
   map (DuplicateEidC . ("node:" <>)) $ duplicateTexts $ map (.idNd) $ Mp.elems mapping
 
 
-duplicateMessageIssues :: Map Text Jv1.Node -> [Conflict]
+duplicateMessageIssues :: Map Text Nd.Node -> [Conflict]
 duplicateMessageIssues mapping =
   let
     messageEids = [message.idMsg | node <- Mp.elems mapping, message <- maybeToList node.messageNd]
@@ -155,7 +157,7 @@ duplicateTexts values =
   counts = Mp.fromListWith (+) $ map (, 1 :: Int) values
 
 
-validateOrderCoverage :: Map Text Jv1.Node -> [Oor.NodeOrd] -> [Conflict]
+validateOrderCoverage :: Map Text Nd.Node -> [Oor.NodeOrd] -> [Conflict]
 validateOrderCoverage mapping orders =
   let
     mappedEids = Mp.keysSet mapping
@@ -173,7 +175,7 @@ orderIssueConflict :: Oor.OrdIssue -> Conflict
 orderIssueConflict issue = BrokenShapeC $ Oor.renderOrdIssue issue
 
 
-nodeFromOrder :: Map Text Jv1.Node -> Oor.NodeOrd -> Either [Conflict] NodeSnap
+nodeFromOrder :: Map Text Nd.Node -> Oor.NodeOrd -> Either [Conflict] NodeSnap
 nodeFromOrder mapping order =
   case Mp.lookup order.eidNode mapping of
     Nothing -> Left [MissingJsonNodeC order.eidNode]
@@ -203,11 +205,11 @@ messageFromJson message = do
         , uidMsg = Nothing
         , timeCreate = Just message.createTimeMsg
         , timeUpdate = message.updateTimeMsg
-        , status = message.statusMsg
+        , status = fromMaybe "<unknown>" message.statusMsg
         , endTurn = message.endTurnMsg
         , weight = message.weightMsg
         , metadata = Ae.toJSON message.metadataMsg
-        , recipient = message.recipientMsg
+        , recipient = fromMaybe "<unknown>" message.recipientMsg
         , channel = message.channelMsg
         , contents = [content]
         , hashMsg = emptyHash

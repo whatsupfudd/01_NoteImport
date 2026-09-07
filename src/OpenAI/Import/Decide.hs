@@ -12,7 +12,7 @@ import qualified Data.Text as T
 import OpenAI.Import.Lookup (RowConv(..))
 import OpenAI.Import.Types (Action(..), ConvState(..), Opts (..), Policy (..))
 import qualified OpenAI.Conversation.Json.Schema as Jd
-import qualified OpenAI.Conversation.Json.V1.Order as Oor
+import qualified OpenAI.Conversation.Json.Node.Order as Oor
 import OpenAI.Utils (safeScientific)
 
 

@@ -52,6 +52,7 @@ planOne opts mbRow conv =
 runOne :: Maybe Ht.Manager -> Hp.Pool -> It.Source -> It.Opts -> Jd.Conversation -> Text
     -> IO (Either Hp.UsageError Ire.Report)
 runOne mgr pool _src opts conv sourceKey= do
+  putStrLn $ "@[runOne] conv: " <> show conv.oaiIdCv <> " sourceKey: " <> show sourceKey
   mbRowE <- Il.byEid pool conv.oaiIdCv
   case mbRowE of
     Left dbErr -> pure $ Left dbErr

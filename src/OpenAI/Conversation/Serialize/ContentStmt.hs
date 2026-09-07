@@ -25,7 +25,7 @@ insertMessage :: Statement
   , Maybe Double
   , Text
   , Maybe Bool
-  , Double
+  , Maybe Double
   , Value
   , Text
   , Maybe Text
@@ -37,7 +37,8 @@ insertMessage =
     insert into oai.messages
       (node_fk, eid, create_time, update_time, status, end_turn, weight, metadata, recipient, channel, seqnbr)
     values
-      ($1 :: int8, $2 :: text, $3 :: float8?, $4 :: float8?, $5 :: text, $6 :: bool?, $7 :: float8, $8 :: jsonb, $9 :: text, $10 :: text?, $11 :: int4)
+      ($1 :: int8, $2 :: text, $3 :: float8?, $4 :: float8?, $5 :: text, $6 :: bool?, $7 :: float8?
+        , $8 :: jsonb, $9 :: text, $10 :: text?, $11 :: int4)
     returning uid :: int8
   |]
 
@@ -352,7 +353,7 @@ insertAudioMeta = insertAudioMetadata
 
 -- TODO: Missing logic:
 
-updateMessage :: Statement (Maybe Double, Maybe Double, Text, Maybe Bool, Double, Value, Text, Maybe Text, Int64) ()
+updateMessage :: Statement (Maybe Double, Maybe Double, Text, Maybe Bool, Maybe Double, Value, Text, Maybe Text, Int64) ()
 updateMessage = undefined
 
 

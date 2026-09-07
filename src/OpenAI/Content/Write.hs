@@ -34,11 +34,11 @@ insertMsg uidNode seqMsg msg =
             , msg.idMsg
             , Just $ toRealFloat msg.createTimeMsg
             , toRealFloat <$> msg.updateTimeMsg
-            , msg.statusMsg
+            , fromMaybe "<unknown>" msg.statusMsg
             , msg.endTurnMsg
-            , toRealFloat msg.weightMsg
+            , toRealFloat <$> msg.weightMsg
             , Ae.toJSON msg.metadataMsg
-            , msg.recipientMsg
+            , fromMaybe "<unknown>" msg.recipientMsg
             , msg.channelMsg
             , seqMsg
             )
@@ -118,11 +118,11 @@ rewriteMsg uidMsg msg =
           Tx.statement
             ( Just $ toRealFloat msg.createTimeMsg
             , toRealFloat <$>msg.updateTimeMsg
-            , msg.statusMsg
+            , fromMaybe "<unknown>" msg.statusMsg
             , msg.endTurnMsg
-            , toRealFloat msg.weightMsg
+            , toRealFloat <$> msg.weightMsg
             , Ae.toJSON msg.metadataMsg
-            , msg.recipientMsg
+            , fromMaybe "<unknown>" msg.recipientMsg
             , msg.channelMsg
             , uidMsg
             )

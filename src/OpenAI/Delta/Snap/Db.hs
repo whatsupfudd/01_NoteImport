@@ -186,7 +186,7 @@ buildMessage row@(uidMsg, uidNode, eidMsg, timeCreate, timeUpdate, status, endTu
             , timeUpdate = Ut.safeScientific =<< timeUpdate
             , status = status
             , endTurn = endTurn
-            , weight = fromMaybe 0 $ Ut.safeScientific weight
+            , weight = Ut.safeScientific weight
             , metadata = metadata
             , recipient = recipient
             , channel = channel

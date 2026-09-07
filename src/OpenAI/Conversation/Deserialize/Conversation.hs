@@ -258,7 +258,7 @@ messageFromRow contentsByMessage (_, uidMsg, eidMsg, timeCreate, timeUpdate, sta
       , Cv.updateTimeMsg = fromMaybe 0 . Ut.safeScientific <$> timeUpdate
       , Cv.statusMsg = status
       , Cv.endTurnMsg = endTurn
-      , Cv.weightMsg = fromMaybe 0 $ Ut.safeScientific weight
+      , Cv.weightMsg = Ut.safeScientific weight
       , Cv.metadataMsg = metadata
       , Cv.recipientMsg = recipient
       , Cv.channelMsg = channel

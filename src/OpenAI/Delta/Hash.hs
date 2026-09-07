@@ -25,10 +25,10 @@ import qualified OpenAI.Delta.Snap as Sn
 import qualified OpenAI.Delta.Types as Dt
 import qualified OpenAI.Conversation.Json.Schema as Jd
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+import qualified OpenAI.Conversation.Json.Node as Nd
 
 
-
-hashNodeJs :: Jv1.Node -> Dt.Hash
+hashNodeJs :: Nd.Node -> Dt.Hash
 hashNodeJs node = Ch.hashValue $ valueNodeJs node
 
 
@@ -56,7 +56,7 @@ hashContentSnap :: Sn.ContentSnap -> Dt.Hash
 hashContentSnap content = Ch.hashValue content.payload
 
 
-valueNodeJs :: Jv1.Node -> Ae.Value
+valueNodeJs :: Nd.Node -> Ae.Value
 valueNodeJs node =
   Ae.object [
       "eid" Ae..= node.idNd

@@ -88,7 +88,7 @@ currentToV1 conv = Jv1.Conversation {
   , Jv1.titleCv = conv.titleCv
   , Jv1.createTimeCv = conv.createTimeCv
   , Jv1.updateTimeCv = conv.updateTimeCv
-  , Jv1.mappingCv = Mp.empty
+  , Jv1.nodeMapCv = conv.nodeMapCv
 }
 
 renderConflicts :: Text -> [Conflict] -> Text

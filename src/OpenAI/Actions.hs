@@ -38,6 +38,7 @@ import qualified OpenAI.Import.Report as Ir
 import qualified OpenAI.Import.Types as Im
 import qualified OpenAI.Conversation.Json.Reader as Jr
 import qualified OpenAI.Conversation.Json.Schema as Js
+import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Process as Op
 import qualified OpenAI.ProjFetcher as Pf
 import qualified OpenAI.Conversation.Deserialize.Conversation as Dcv
@@ -72,13 +73,16 @@ parseJson jsonFile exportB = do
   jsonContent <- Bsl.readFile jsonFile
   if exportB then
     let
-      eiConversations = Ae.eitherDecode jsonContent :: Either String [Js.Conversation]
+      eiConversations = Ae.eitherDecode jsonContent :: Either String [Ae.Value] -- Jv1.Conversation
     in
     case eiConversations of
       Left errMsg -> pure $ Left errMsg
-      Right conversations -> do
-        convKeys <- mapM (const Uu.nextRandom) conversations
-        pure . Right $ zipWith (\conv key -> (conv, Uu.toText key)) conversations convKeys
+      Right values -> do
+        convKeys <- mapM (const Uu.nextRandom) values
+        case partitionEithers $ map Jr.parseFromValue values of
+          ([], conversations) ->
+            pure . Right $ zipWith (\conv key -> (conv, Uu.toText key)) conversations convKeys
+          (errs, _) -> pure $ Left $ "@[parseJson] " <> show errs
   else
     case Jr.parse jsonContent of
       Left errMsg -> pure $ Left errMsg

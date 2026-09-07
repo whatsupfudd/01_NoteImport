@@ -31,7 +31,8 @@ import qualified OpenAI.Conversation as Cv
 import OpenAI.Delta.Types (Conflict(..), Hash(..))
 import qualified OpenAI.Conversation.Json.Schema as Jd
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
-import qualified OpenAI.Conversation.Json.V1.Order as Oor
+import qualified OpenAI.Conversation.Json.Node.Order as Oor
+import qualified OpenAI.Conversation.Json.Node as Nd
 
 
 data ConvSnap = ConvSnap {
@@ -66,7 +67,7 @@ data MsgSnap = MsgSnap {
     , timeUpdate :: Maybe Scientific
     , status :: Text
     , endTurn :: Maybe Bool
-    , weight :: Scientific
+    , weight :: Maybe Scientific
     , metadata :: Ae.Value
     , recipient :: Text
     , channel :: Maybe Text
@@ -88,15 +89,15 @@ data ContentSnap = ContentSnap {
 
 fromJson :: Jv1.Conversation -> Either [Conflict] ConvSnap
 fromJson conv =
-  case Oor.buildNodeOrd conv.mappingCv of
+  case Oor.buildNodeOrd conv.nodeMapCv of
     Left issues ->
       Left $ map ordConflict issues
 
     Right ords ->
       let
-        issues0 = topConflictsJs conv <> nodeKeyConflictsJs conv.mappingCv <> msgDupConflictsJs conv.mappingCv
+        issues0 = topConflictsJs conv <> nodeKeyConflictsJs conv.nodeMapCv <> msgDupConflictsJs conv.nodeMapCv
         ordMap = Mp.fromList [(ord.eidNode, ord) | ord <- ords]
-        nodeRez = map (nodeSnapJs conv.mappingCv ordMap) ords
+        nodeRez = map (nodeSnapJs conv.nodeMapCv ordMap) ords
       in
       case collectE $ map leftRightMerge nodeRez of
         Left issues1 ->
@@ -159,7 +160,7 @@ topConflictsDb conv =
     <> emptyTxtConflict "conversation.eid" conv.eidCv
 
 
-nodeKeyConflictsJs :: Map Text Jv1.Node -> [Conflict]
+nodeKeyConflictsJs :: Map Text Nd.Node -> [Conflict]
 nodeKeyConflictsJs mapping =
   [ BrokenShapeC $
       "json node key/id mismatch: key=" <> eidKey <> ", id=" <> node.idNd
@@ -177,7 +178,7 @@ nodeKeyConflictsDb mapping =
   ]
 
 
-msgDupConflictsJs :: Map Text Jv1.Node -> [Conflict]
+msgDupConflictsJs :: Map Text Nd.Node -> [Conflict]
 msgDupConflictsJs mapping =
   map DuplicateEidC $ dupTxts $ catMaybes [(.idMsg) <$> node.messageNd | node <- Mp.elems mapping]
 
@@ -187,7 +188,7 @@ msgDupConflictsDb mapping =
   map DuplicateEidC $ dupTxts $ catMaybes [(.eidMsg) <$> node.messageNd | node <- Mp.elems mapping]
 
 
-nodeSnapJs :: Map Text Jv1.Node -> Map Text Oor.NodeOrd -> Oor.NodeOrd -> Either [Conflict] NodeSnap
+nodeSnapJs :: Map Text Nd.Node -> Map Text Oor.NodeOrd -> Oor.NodeOrd -> Either [Conflict] NodeSnap
 nodeSnapJs mapping ordMap ord =
   case Mp.lookup ord.eidNode mapping of
     Nothing ->
@@ -254,7 +255,7 @@ nodeSnapDb eidByUid node = do
     }
 
 
-parentConflictJs :: Jv1.Node -> Oor.NodeOrd -> [Conflict]
+parentConflictJs :: Nd.Node -> Oor.NodeOrd -> [Conflict]
 parentConflictJs node ord
   | node.parentNd == ord.eidParent = []
   | otherwise =
@@ -282,11 +283,11 @@ msgSnapJs msg = do
           , uidMsg = Nothing
           , timeCreate = Just msg.createTimeMsg
           , timeUpdate = msg.updateTimeMsg
-          , status = msg.statusMsg
+          , status = fromMaybe "<unknown>"msg.statusMsg
           , endTurn = msg.endTurnMsg
           , weight = msg.weightMsg
           , metadata = metadata0
-          , recipient = msg.recipientMsg
+          , recipient = fromMaybe "<unknown>" msg.recipientMsg
           , channel = msg.channelMsg
           , contents = contents0
           , hashMsg = hashMsg0

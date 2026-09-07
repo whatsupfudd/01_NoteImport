@@ -169,9 +169,9 @@ renderUidParts report =
 
 renderCount :: Count -> Text
 renderCount count =
-  let pieces =
-        concat
-          [ [ "conv +" <> tshow count.convAddedCnt | count.convAddedCnt > 0 ]
+  let
+    pieces = concat [
+            [ "conv +" <> tshow count.convAddedCnt | count.convAddedCnt > 0 ]
           , [ "conv ~" <> tshow count.convUpdatedCnt | count.convUpdatedCnt > 0 ]
           , [ "disc +" <> tshow count.discAddedCnt | count.discAddedCnt > 0 ]
           , [ "disc ~" <> tshow count.discUpdatedCnt | count.discUpdatedCnt > 0 ]
@@ -179,7 +179,9 @@ renderCount count =
           , [ "skip " <> tshow count.skipCnt | count.skipCnt > 0 ]
           , [ "fail " <> tshow count.failCnt | count.failCnt > 0 ]
           ]
-   in if null pieces then "no-op" else T.intercalate ", " pieces
+  in
+  if null pieces then "no-op" else T.intercalate ", " pieces
+
 
 renderNotes :: [Note] -> Text
 renderNotes notes =

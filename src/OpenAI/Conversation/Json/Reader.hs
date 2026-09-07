@@ -2,7 +2,7 @@
 
 module OpenAI.Conversation.Json.Reader (
   VersionJson(..)
-  , parse, parseFollow, mergeBrowseJson
+  , parse, parseFromValue, parseFollow, mergeBrowseJson
   , module OpenAI.Conversation.Json.Schema
 )
 where
@@ -41,11 +41,16 @@ parse jsonContent = do
   case Ae.eitherDecode jsonContent :: Either String Ae.Value of
     Left err -> Left err
     Right rawJson ->
-      case Aet.parseEither parseMixed rawJson :: Either String MixedConversation of
-        Left err -> Left err
-        Right mxConv -> case mxConv of
-          V1Cv conv -> Right $ Jc.v1ToCurrent conv
-          V2Cv conv -> Right conv
+      parseFromValue rawJson
+
+
+parseFromValue :: Ae.Value -> Either String Conversation
+parseFromValue rawJson = do
+  case Aet.parseEither parseMixed rawJson :: Either String MixedConversation of
+    Left err -> Left err
+    Right mxConv -> case mxConv of
+      V1Cv conv -> Right $ Jc.v1ToCurrent conv
+      V2Cv conv -> Right conv
 
 
 parseFollow :: Bs.ByteString -> Either String FollowConv

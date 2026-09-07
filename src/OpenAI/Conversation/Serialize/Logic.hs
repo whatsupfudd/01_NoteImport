@@ -1,10 +1,11 @@
 {-# LANGUAGE DerivingStrategies #-}
 
-module OpenAI.Conversation.Serialize.Conversation where
+module OpenAI.Conversation.Serialize.Logic where
 
 import Data.Int (Int32, Int64)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Scientific (Scientific, toRealFloat)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -15,9 +16,10 @@ import qualified Hasql.Transaction.Sessions as Txs
 
 import OpenAI.Conversation.Json.Schema (Conversation (..), Message (..))
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
-import qualified OpenAI.Conversation.Json.V1.Order as Oor
+import qualified OpenAI.Conversation.Json.Node.Order as Oor
 import qualified OpenAI.Conversation.Serialize.Content as Cw
 import qualified OpenAI.Conversation.Serialize.ConversationStmt as St
+import qualified OpenAI.Conversation.Json.Node as Nd
 
 
 data ReportRawAdd = ReportRawAdd {
@@ -78,8 +80,11 @@ addConversation pool conversation =
 
 
 addConversationR :: Hp.Pool -> Jv1.Conversation -> IO (Either Hp.UsageError (Either String ReportRawAdd))
-addConversationR pool conversation =
-  case Oor.buildNodeOrd conversation.mappingCv of
+addConversationR pool conversation = do
+  putStrLn . T.unpack $ "@[addConversationR] node map: " 
+    <> T.intercalate "\n, " (map (\(eid, node) -> "eid: " <> eid <> ", parentEid: " <> fromMaybe "<none>" node.parentNd) (Mp.toList conversation.nodeMapCv))
+
+  case Oor.buildNodeOrd conversation.nodeMapCv of
     Left issues ->
       pure . Right . Left $ Oor.renderOrdIssues conversation issues
     Right nodeOrds ->
@@ -89,7 +94,7 @@ addConversationR pool conversation =
       in
       useTx pool $ do
         convUid <- addConversationRoot conversation
-        statRez <- addOrderedNodesReportSession convUid conversation.mappingCv ordByEid ordsAsc
+        statRez <- addOrderedNodesReportSession convUid conversation.nodeMapCv ordByEid ordsAsc
         case statRez of
           Left err -> do
             Tx.condemn
@@ -118,13 +123,13 @@ addConversationRoot conversation =
     St.insertConversation
 
 
-addOrderedNodesSession :: Int64 -> Mp.Map Text Jv1.Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
+addOrderedNodesSession :: Int64 -> Mp.Map Text Nd.Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
       -> Tx.Transaction (Either String ())
 addOrderedNodesSession convUid mapping ordByEid ordsAsc =
   fmap (fmap (const ())) $ addOrderedNodesReportSession convUid mapping ordByEid ordsAsc
 
 
-addOrderedNodesReportSession :: Int64 -> Mp.Map Text Jv1.Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
+addOrderedNodesReportSession :: Int64 -> Mp.Map Text Nd.Node -> Mp.Map Text Oor.NodeOrd -> [Oor.NodeOrd]
       -> Tx.Transaction (Either String StatRawAdd)
 addOrderedNodesReportSession convUid mapping ordByEid ordsAsc
   | Mp.size ordByEid /= length ordsAsc =
@@ -180,13 +185,13 @@ sortNodeOrds =
   L.sortOn $ \nodeOrd -> (nodeOrd.seqPre, nodeOrd.seqNode, nodeOrd.seqChild, nodeOrd.eidNode)
 
 
-addNode :: Int64 -> Maybe Int64 -> Text -> Jv1.Node -> Int32 -> Int32 -> Int32
+addNode :: Int64 -> Maybe Int64 -> Text -> Nd.Node -> Int32 -> Int32 -> Int32
       -> Tx.Transaction (Either String Int64)
 addNode convUid parentUid eidNode node seqNode seqChild seqPre =
   fmap (fmap fst) $ addNodeR convUid parentUid eidNode node seqNode seqChild seqPre
 
 
-addNodeR :: Int64 -> Maybe Int64 -> Text -> Jv1.Node -> Int32 -> Int32 -> Int32
+addNodeR :: Int64 -> Maybe Int64 -> Text -> Nd.Node -> Int32 -> Int32 -> Int32
       -> Tx.Transaction (Either String (Int64, StatRawAdd))
 addNodeR convUid parentUid eidNode node seqNode seqChild seqPre = do
   nodeUid <- Tx.statement

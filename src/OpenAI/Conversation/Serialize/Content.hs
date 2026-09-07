@@ -28,11 +28,11 @@ insertMsgTree uidNode message = do
     , message.idMsg
     , Just $ toRealFloat message.createTimeMsg
     , toRealFloat <$> message.updateTimeMsg
-    , message.statusMsg
+    , fromMaybe "<unknown>" message.statusMsg
     , message.endTurnMsg
-    , toRealFloat message.weightMsg
+    , toRealFloat <$> message.weightMsg
     , Ae.toJSON message.metadataMsg
-    , message.recipientMsg
+    , fromMaybe "<unknown>" message.recipientMsg
     , message.channelMsg
     , 0
     )
@@ -57,11 +57,11 @@ rewriteMsgTree uidMsg message = do
   Tx.statement
     ( Just $ toRealFloat message.createTimeMsg
     , toRealFloat <$> message.updateTimeMsg
-    , message.statusMsg
+    , fromMaybe "<unknown>" message.statusMsg
     , message.endTurnMsg
-    , toRealFloat message.weightMsg
+    , toRealFloat <$> message.weightMsg
     , Ae.toJSON message.metadataMsg
-    , message.recipientMsg
+    , fromMaybe "<unknown>" message.recipientMsg
     , message.channelMsg
     , uidMsg
     )
@@ -329,7 +329,7 @@ insertAudioMetadataTree uidPointer metadata =
 
 
 updateMessage :: Statement
-      ( Maybe Double, Maybe Double, Text, Maybe Bool, Double, Ae.Value
+      ( Maybe Double, Maybe Double, Text, Maybe Bool, Maybe Double, Ae.Value
       , Text, Maybe Text, Int64
       )
       ()
@@ -340,7 +340,7 @@ updateMessage =
         update_time = $2 :: float8?,
         status = $3 :: text,
         end_turn = $4 :: bool?,
-        weight = $5 :: float8,
+        weight = $5 :: float8?,
         metadata = $6 :: jsonb,
         recipient = $7 :: text,
         channel = $8 :: text?

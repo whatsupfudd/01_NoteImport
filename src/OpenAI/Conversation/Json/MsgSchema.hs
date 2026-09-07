@@ -27,11 +27,11 @@ data Message = Message {
   , createTimeMsg :: Scientific
   , updateTimeMsg :: Maybe Scientific
   , contentMsg :: Content
-  , statusMsg :: Text
+  , statusMsg :: Maybe Text
   , endTurnMsg :: Maybe Bool
-  , weightMsg :: Scientific
+  , weightMsg :: Maybe Scientific
   , metadataMsg :: Mp.Map Text Value
-  , recipientMsg :: Text
+  , recipientMsg :: Maybe Text
   , channelMsg :: Maybe Text
   } deriving (Show, Eq, Generic, ToJSON)
 
@@ -41,14 +41,14 @@ instance FromJSON Message where
       <$> o .: "id"
       <*> o .: "author"
       <*> o .: "create_time"
-      <*> o .: "update_time"
+      <*> o .:? "update_time"
       <*> o .: "content"
-      <*> o .: "status"
-      <*> o .: "end_turn"
-      <*> o .: "weight"
-      <*> (objectToMap <$> o .: "metadata")
-      <*> o .: "recipient"
-      <*> o .: "channel"
+      <*> o .:? "status"
+      <*> o .:? "end_turn"
+      <*> o .:? "weight"
+      <*> (objectToMap <$> o .: "metadata" <|> pure Mp.empty)
+      <*> o .:? "recipient"
+      <*> o .:? "channel"
 
 
 data Author = Author
@@ -62,7 +62,7 @@ instance FromJSON Author where
     Author
       <$> o .: "role"
       <*> o .: "name"
-      <*> (objectToMap <$> o .: "metadata")
+      <*> (objectToMap <$> o .: "metadata" <|> pure Mp.empty)
 
 
 data Content =

@@ -1,4 +1,4 @@
-module OpenAI.Conversation.Json.V1.Parse where
+module OpenAI.Conversation.Json.Node.Parse where
 
 import qualified Data.ByteString.Lazy as Bl
 import qualified Data.List as L
@@ -14,6 +14,7 @@ import qualified Data.Aeson as Ae
 
 import qualified Options.Runtime as Rto
 import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
+import qualified OpenAI.Conversation.Json.Node as Nd
 import qualified OpenAI.Conversation.Unify as Ju
 import qualified OpenAI.Conversation.Json.MsgSchema as Jm
 import OpenAI.Types
@@ -23,15 +24,15 @@ analyzeV1 :: Jv1.Conversation -> Either Text Context
 analyzeV1 v1Conv =
   let
     -- rootChild = Mp.lookup "client-created-root" discussion.mappingCv
-    mbRootNode = findRootNode v1Conv.mappingCv
+    mbRootNode = findRootNode v1Conv.nodeMapCv
   in
   case mbRootNode of
     Just rootNode ->
-      Right $ runFSM initContext v1Conv.mappingCv rootNode.idNd
+      Right $ runFSM initContext v1Conv.nodeMapCv rootNode.idNd
     Nothing -> Left $ "@[analyzeDiscussion] no root node found for discussion: " <> v1Conv.titleCv <> ", id: " <> v1Conv.convIdCv
 
 
-runFSM :: Context -> Mp.Map Text Jv1.Node -> Text -> Context
+runFSM :: Context -> Mp.Map Text Nd.Node -> Text -> Context
 runFSM context mapping nodeID =
   case Mp.lookup nodeID mapping of
     Nothing -> context { issues = "node not found: " <> nodeID : context.issues }
@@ -51,7 +52,8 @@ runFSM context mapping nodeID =
       foldr (\nodeID accum -> runFSM accum mapping nodeID) updCtxt node.childrenNd
 
 
-findRootNode :: Mp.Map Text Jv1.Node -> Maybe Jv1.Node
+-- TODO: deduplicate from Json.Node.Order.selectRoot
+findRootNode :: Mp.Map Text Nd.Node -> Maybe Nd.Node
 findRootNode mapping =
   case Mp.lookup "client-created-root" mapping of
     Just node -> Just node

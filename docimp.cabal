@@ -50,20 +50,21 @@ library
       OpenAI.Conversation.Deserialize.Conversation
       OpenAI.Conversation.Deserialize.ConversationStmt
       OpenAI.Conversation.Json.MsgSchema
+      OpenAI.Conversation.Json.Node
+      OpenAI.Conversation.Json.Node.Order
+      OpenAI.Conversation.Json.Node.Parse
       OpenAI.Conversation.Json.Reader
       OpenAI.Conversation.Json.Schema
       OpenAI.Conversation.Json.Types
       OpenAI.Conversation.Json.Utils
       OpenAI.Conversation.Json.V1.Convert
-      OpenAI.Conversation.Json.V1.Order
-      OpenAI.Conversation.Json.V1.Parse
       OpenAI.Conversation.Json.V1.Schema
       OpenAI.Conversation.Process
       OpenAI.Conversation.Serialize.Content
       OpenAI.Conversation.Serialize.ContentStmt
-      OpenAI.Conversation.Serialize.Conversation
       OpenAI.Conversation.Serialize.ConversationStmt
       OpenAI.Conversation.Serialize.IncrUpdate
+      OpenAI.Conversation.Serialize.Logic
       OpenAI.Conversation.Unify
       OpenAI.ConvToDisc
       OpenAI.Delta.Apply

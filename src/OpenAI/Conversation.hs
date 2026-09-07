@@ -13,7 +13,7 @@ import Data.Scientific (Scientific)
 import Data.Text (Text)
 import qualified Data.Vector as V
 
-import OpenAI.Conversation.Json.V1.Order (NodeOrd(..))
+import OpenAI.Conversation.Json.Node.Order (NodeOrd(..))
 
 
 -- | Root representation of a raw OpenAI conversation as stored in 'oai.conversations'.
@@ -47,7 +47,7 @@ data MessageDb = MessageDb {
   , updateTimeMsg :: Maybe Scientific
   , statusMsg :: Text
   , endTurnMsg :: Maybe Bool
-  , weightMsg :: Scientific
+  , weightMsg :: Maybe Scientific
   , metadataMsg :: Value
   , recipientMsg :: Text
   , channelMsg :: Maybe Text

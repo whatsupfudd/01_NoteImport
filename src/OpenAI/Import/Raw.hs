@@ -13,7 +13,7 @@ import qualified OpenAI.Import.Lookup as Lk
 import qualified OpenAI.Import.Report as Rp
 import qualified OpenAI.Import.Types as It
 import qualified OpenAI.Conversation.Json.Schema as Jd
-import qualified OpenAI.Conversation.Serialize.Conversation as Scv
+import qualified OpenAI.Conversation.Serialize.Logic as Csl
 import qualified OpenAI.Conversation.Serialize.IncrUpdate as Sin
 
 
@@ -22,7 +22,7 @@ addFresh pool conversation =
   let
     fakeV1 = Sin.currentToV1 conversation
   in do
-  result <- Scv.addConversationR pool fakeV1
+  result <- Csl.addConversationR pool fakeV1
   pure $
     case result of
       Left usageError -> Left usageError
@@ -39,7 +39,7 @@ updateKnown pool rowConv conversation sourceKey = do
     Right (Right reportRaw) -> Right . Right $ reportKnown rowConv conversation reportRaw
 
 
-reportFresh :: Jd.Conversation -> Scv.ReportRawAdd -> Rp.Report
+reportFresh :: Jd.Conversation -> Csl.ReportRawAdd -> Rp.Report
 reportFresh conversation reportRaw =
   Rp.Report {
     Rp.eidConv = conversation.oaiIdCv
@@ -64,7 +64,7 @@ countFresh =
   }
 
 
-notesFresh :: Scv.ReportRawAdd -> [Rp.Note]
+notesFresh :: Csl.ReportRawAdd -> [Rp.Note]
 notesFresh reportRaw =
   Rp.InfoN "raw conversation added"
     : catMaybes [

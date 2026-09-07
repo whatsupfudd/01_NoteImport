@@ -23,6 +23,7 @@ import Data.Aeson.Types (Parser)
 import OpenAI.Conversation.Json.Utils
 import OpenAI.Conversation.Json.Types
 import OpenAI.Conversation.Json.MsgSchema
+import qualified OpenAI.Conversation.Json.Node as Nd
 
 
 data Conversation = Conversation {
@@ -60,6 +61,7 @@ data Conversation = Conversation {
   , currentNodeCv :: Text
   , pageInfoCv :: PageInfo
   , contextTruncationContinuationCv :: Maybe Value
+  , nodeMapCv :: Mp.Map Text Nd.Node
   } deriving (Show, Generic, ToJSON)
 
 instance FromJSON Conversation where
@@ -98,6 +100,8 @@ instance FromJSON Conversation where
       <*> o .: "current_node"
       <*> o .: "page_info"
       <*> o .: "context_truncation_continuation"
+      <*> pure Mp.empty
+ 
 
 
 data FollowConv = FollowConv {

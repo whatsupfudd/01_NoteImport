@@ -33,6 +33,7 @@ import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Json.V1.Convert as Jcv
 import qualified OpenAI.Conversation.Serialize.Content as Cw
 import qualified OpenAI.Conversation.Serialize.ConversationStmt as Cs
+import qualified OpenAI.Conversation.Json.Node as Nd
 
 
 data ApplyResult = ApplyResult {
@@ -149,7 +150,7 @@ applyAddedNodes conversationUid conversation uidByEid =
   foldNodes state (action : rest) =
     case action of
       Dt.AddNA eidNode eidParent seqNode seqChild seqPre ->
-        case (Mp.lookup eidNode conversation.mappingCv, parentUid state.uidsNodeAS eidParent) of
+        case (Mp.lookup eidNode conversation.nodeMapCv, parentUid state.uidsNodeAS eidParent) of
           (Nothing, _) -> abort [Dt.MissingJsonNodeC eidNode]
           (_, Left conflict) -> abort [conflict]
           (Just node, Right parentFk) -> do
@@ -340,7 +341,7 @@ validateAddActs conversation jsonSnap initialUids actions =
       Dt.AddNA eidNode eidParent seqNode seqChild seqPre ->
         let
           nodeConflicts =
-            case Mp.lookup eidNode conversation.mappingCv of
+            case Mp.lookup eidNode conversation.nodeMapCv of
               Nothing -> [Dt.MissingJsonNodeC eidNode]
               Just node
                 | node.parentNd /= eidParent -> [Dt.ParentMismatchC eidNode]
@@ -549,9 +550,9 @@ jsonMessageMap conversation =
 
 messageEntries :: Jv1.Conversation -> [(Text, Jd.Message)]
 messageEntries conversation =
-  mapMaybe fromNode $ Mp.elems conversation.mappingCv
+  mapMaybe fromNode $ Mp.elems conversation.nodeMapCv
   where
-  fromNode :: Jv1.Node -> Maybe (Text, Jd.Message)
+  fromNode :: Nd.Node -> Maybe (Text, Jd.Message)
   fromNode node =
     case node.messageNd of
       Nothing -> Nothing
@@ -560,7 +561,7 @@ messageEntries conversation =
 
 messageAtNode :: Jv1.Conversation -> Text -> Text -> Maybe Jd.Message
 messageAtNode conversation eidNode eidMsg = do
-  node <- Mp.lookup eidNode conversation.mappingCv
+  node <- Mp.lookup eidNode conversation.nodeMapCv
   message <- node.messageNd
   if message.idMsg == eidMsg then Just message else Nothing
 

@@ -34,6 +34,7 @@ runBatch mgr pool source opts convs =
   let
     (convsDedup, repsDup) = dedupConvs convs
   in do
+  putStrLn $ "@[runBatch] dedupConvs: " <> show (length convs) <> " -> " <> show (length convsDedup)
   acc <- foldBatch (BatchAcc [] repsDup) convsDedup
   let
     repsAll = orderReports acc.repsAcc
