@@ -146,7 +146,7 @@ data ImageAssetPointerDb = ImageAssetPointerDb {
 
 
 data RealTimeUserAVDb = RealTimeUserAVDb {
-    expiryDatetimeRtuav :: Maybe Value
+    expiryDatetimeRtuav :: Maybe Double
   , framesAssetPointersRtuav :: Value
   , videoContainerAssetPointerRtuav :: Maybe Value
   , audioStartTimestampRtuav :: Maybe Scientific
@@ -155,7 +155,7 @@ data RealTimeUserAVDb = RealTimeUserAVDb {
 
 -- | Represents 'oai.audio_asset_pointer_mmpart' and 'oai.metadatas_audioasset'.
 data AudioAssetPointerDb = AudioAssetPointerDb {
-    expiryDatetimeAap :: Maybe Value
+    expiryDatetimeAap :: Maybe Double
   , assetPointerAap :: Text
   , sizeBytesAap :: Int64
   , formatAap :: Text
@@ -206,8 +206,8 @@ data GenerationDb = GenerationDb {
 
 
 data AudioMetadataDb = AudioMetadataDb {
-    startTimestampAm :: Maybe Value
-  , endTimestampAm :: Maybe Value
+    startTimestampAm :: Maybe Double
+  , endTimestampAm :: Maybe Double
   , pretokenizedVqAm :: Maybe Value
   , interruptionsAm :: Maybe Value
   , originalAudioSourceAm :: Maybe Value

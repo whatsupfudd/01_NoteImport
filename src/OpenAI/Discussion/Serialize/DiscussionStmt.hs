@@ -28,7 +28,7 @@ insertDiscussion =
 insertDiscussionIssue :: Statement (Int64, Int32, Text) ()
 insertDiscussionIssue =
   [TH.resultlessStatement|
-    insert into oai.discussion_issue (context_fk, seq, text)
+    insert into oai.discussion_issue (discussion_fk, seq, text)
     values ($1 :: int8, $2 :: int4, $3 :: text)
   |]
 

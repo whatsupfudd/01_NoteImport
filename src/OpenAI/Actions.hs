@@ -278,12 +278,9 @@ optsFromStore storeOpts =
 reportDbErrors :: String -> Either [Hp.UsageError] (Either [String] [resultT]) -> IO ()
 reportDbErrors opLabel eiRez =
   case eiRez of
-    Left errs ->
-      putStrLn $ "@[" <> opLabel <> "] db err: " <> show errs
-    Right (Left errs) ->
-      putStrLn $ "@[" <> opLabel <> "] logic err: " <> show errs
-    Right (Right results) ->
-      putStrLn $ "@[" <> opLabel <> "] saved " <> show (length results) <> "."
+    Left errs -> putStrLn $ "@[" <> opLabel <> "] db err: " <> show errs
+    Right (Left errs) -> putStrLn $ "@[" <> opLabel <> "] logic err: " <> show errs
+    Right (Right results) -> putStrLn $ "@[" <> opLabel <> "] saved " <> show (length results) <> "."
 
 
 saveSummaries :: Opt.TargetsOpts -> Rto.RunOptions -> IO ()
@@ -426,23 +423,30 @@ convertConversation targetOpts rtOpts =
           rezA <- Mc.runContT pgPool convStoreAllConversations
           reportDbErrors "convStoreAllConversations" rezA
         targets -> do
-          let targetIds = map EidCI targets
+          let
+            targetIds = map EidCI targets
           rezA <- Mc.runContT pgPool (convStoreDiscussions targetIds)
           reportDbErrors "convStoreDiscussion" rezA
 
 
-convStoreAllConversations :: Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
+data ConvStoreRez =
+  NewCS Int64
+  | ExistingCS Int64
+
+
+convStoreAllConversations :: Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [ConvStoreRez]))
 convStoreAllConversations pgPool = do
   eiConversations <- Dcv.fetchAllConversations pgPool
   case eiConversations of
-    Left err ->
-      pure . Left $ [err]
+    Left err -> pure . Left $ [err]
     Right conversations ->
-      let targetIds = map UidCI (Mp.elems conversations)
-      in convStoreDiscussions targetIds pgPool
+      let
+        targetIds = map UidCI (Mp.elems conversations)
+      in
+      convStoreDiscussions targetIds pgPool
 
 
-convStoreDiscussions :: [ItemIdent] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
+convStoreDiscussions :: [ItemIdent] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [ConvStoreRez]))
 convStoreDiscussions targets pgPool = do
   results <- mapM (convStoreADiscussion pgPool) targets
   case lefts results of
@@ -453,36 +457,47 @@ convStoreDiscussions targets pgPool = do
     errs -> pure $ Left errs
 
 
-convStoreADiscussion :: Hp.Pool -> ItemIdent -> IO (Either Hp.UsageError (Either String Int64))
+convStoreADiscussion :: Hp.Pool -> ItemIdent -> IO (Either Hp.UsageError (Either String ConvStoreRez))
 convStoreADiscussion pgPool target = do
   eiErrRez <- case target of
     EidCI eid -> Dcv.getConversationByEid pgPool eid
     UidCI uid -> Dcv.getConversationByUid pgPool uid
     UuidCI uuid -> pure . Right . Left $ "UUID target not supported for conversation lookup: " <> show uuid
   case eiErrRez of
-    Left err ->
-      pure $ Left err
+    Left err -> pure $ Left err
     Right eiMbConv ->
       case eiMbConv of
-        Left errMsg ->
-          pure . Right $ Left errMsg
+        Left errMsg -> pure . Right $ Left errMsg
         Right mbConv ->
           case mbConv of
-            Nothing ->
-              pure . Right $ Left "no conversation found"
+            Nothing -> pure . Right $ Left "no conversation found"
             Just convDb -> do
-              putStrLn $ "@[convStoreDiscussion] deserializing for target: " <> show target
+              -- putStrLn $ "@[convStoreDiscussion] deserializing for target: " <> show target
+              -- putStrLn $ "@[convStoreDiscussion] title: " <> show convDb
+              {-
+              let
+                childMap = Ccv.buildChildMap convDb.nodesCv
+              putStrLn $ "@[convStoreDiscussion] childMap: " <> show childMap
+              -}
               case Ccv.analyzeConversation convDb of
-                Left errMsgA ->
-                  pure . Right . Left $ T.unpack errMsgA
+                Left errMsgA -> pure . Right . Left $ T.unpack errMsgA
                 Right context -> do
-                  rezA <- Sdc.storeDiscussion pgPool convDb.titleCv convDb.eidCv context
-                  case rezA of
+                  -- putStrLn $ "@[convStoreDiscussion] context: " <> show context
+                  rezB <- Ddc.findDiscussionByConvId pgPool convDb.eidCv
+                  case rezB of
                     Left errMsgB -> do
                       putStrLn $ "@[convertConversation] error: " <> errMsgB
                       pure . Right $ Left errMsgB
-                    Right (ctxUid, _) ->
-                      pure . Right $ Right ctxUid
+                    Right mbIds ->
+                      case mbIds of
+                        Nothing -> do
+                          rezA <- Sdc.storeDiscussion pgPool convDb.titleCv convDb.eidCv context
+                          case rezA of
+                            Left errMsgB -> do
+                              putStrLn $ "@[convertConversation] error: " <> errMsgB
+                              pure . Right $ Left errMsgB
+                            Right (ctxUid, _) -> pure . Right . Right $ NewCS ctxUid
+                        Just (uid, eid) -> pure . Right . Right $ ExistingCS uid
 
 
 saveConversations :: [(Js.Conversation, Text)] -> Hp.Pool -> IO (Either [Hp.UsageError] (Either [String] [Int64]))
@@ -638,19 +653,19 @@ genDocxByDiscId dbPool destPath itemId = do
   eiRez <- case itemId of
     EidCI eid -> Ddc.findDiscussionByConvId dbPool eid
     UidCI uid -> Ddc.findDiscussionByUid dbPool uid
-    UuidCI uuid -> pure . Right $ Just uuid
+    UuidCI uuid -> pure . Right $ Just (0, uuid)
   case eiRez of
     Left err -> do
       putStrLn $ "@[genDocxByConvId] err: " <> err
       pure . Right $ Left err
-    Right mbUuid ->
-      case mbUuid of
+    Right mbIds ->
+      case mbIds of
         Nothing -> do
           let errMsg = "@[genDocxByConvId] no discourse found for id: " <> show itemId
           putStrLn errMsg
           pure . Right $ Left errMsg
-        Just uuid ->
-          genDocxDb destPath uuid dbPool
+        Just (uid, eid) ->
+          genDocxDb destPath eid dbPool
 
 
 genDocxDb :: FilePath -> UUID -> Hp.Pool -> IO (Either Hp.UsageError (Either String Int64))
@@ -681,66 +696,57 @@ genSummaries targetOpts dbPool =
     Just groupName -> do
       eiDiscussions <- Ddc.allDiscussionsInGroup dbPool groupName
       case eiDiscussions of
-        Left err ->
-          pure . Left $ [err]
+        Left err -> pure . Left $ [err]
         Right discussions -> do
-          let targetIds = V.toList $ V.map (\(_, _, uuid) -> uuid) discussions
+          let
+            targetIds = V.toList $ V.map (\(_, _, uuid) -> uuid) discussions
           httpManager <- Sm.newOllamaManager
           rezA <- mapM (genSummariesByDiscEid dbPool httpManager) targetIds
           pure $ Utl.listResultsToResultList rezA
     Nothing ->
       case targetOpts.targetsTO of
-        [] ->
-          pure . Right $ Left ["@[genSummaries] no targets to summarize."]
+        [] -> pure . Right $ Left ["@[genSummaries] no targets to summarize."]
         someTargets -> do
-          let targetIds = map EidCI someTargets
+          let
+            targetIds = map EidCI someTargets
           httpManager <- Sm.newOllamaManager
           rezA <- mapM (genOne httpManager) targetIds
           pure $ Utl.listResultsToResultList rezA
   where
-    genOne :: Ht.Manager -> ItemIdent -> IO (Either Hp.UsageError (Either String ()))
-    genOne httpManager target = do
-      putStrLn $ "@[genSummaries] searching: " <> show target
-      eiRez <- case target of
-        EidCI eid -> Ddc.findDiscussionByConvId dbPool eid
-        UidCI uid -> Ddc.findDiscussionByUid dbPool uid
-        UuidCI uuid -> pure . Right $ Just uuid
-      case eiRez of
-        Left err ->
-          pure . Right $ Left err
-        Right mbDiscourse ->
-          case mbDiscourse of
-            Nothing ->
-              pure . Right . Left $ "no discourse found for id: " <> show target
-            Just discourseId ->
-              genSummariesByDiscEid dbPool httpManager discourseId
+  genOne :: Ht.Manager -> ItemIdent -> IO (Either Hp.UsageError (Either String ()))
+  genOne httpManager target = do
+    putStrLn $ "@[genSummaries] searching: " <> show target
+    eiRez <- case target of
+      EidCI eid -> Ddc.findDiscussionByConvId dbPool eid
+      UidCI uid -> Ddc.findDiscussionByUid dbPool uid
+      UuidCI uuid -> pure . Right $ Just (0, uuid)
+    case eiRez of
+      Left err -> pure . Right $ Left err
+      Right mbDiscourse ->
+        case mbDiscourse of
+          Nothing -> pure . Right . Left $ "no discourse found for id: " <> show target
+          Just (uid, eid) -> genSummariesByDiscEid dbPool httpManager eid
 
 
 genSummariesByDiscEid :: Hp.Pool -> Ht.Manager -> UUID -> IO (Either Hp.UsageError (Either String ()))
 genSummariesByDiscEid dbPool httpManager discourseId = do
   eiRez <- Ddc.loadDiscussion dbPool discourseId
   case eiRez of
-    Left err ->
-      pure $ Left err
+    Left err -> pure $ Left err
     Right eiMbDiscourse ->
       case eiMbDiscourse of
-        Left err ->
-          pure . Right $ Left err
+        Left err -> pure . Right $ Left err
         Right mbDiscourse ->
           case mbDiscourse of
-            Nothing ->
-              pure . Right . Left $ "no discourse found for id: " <> show discourseId
+            Nothing -> pure . Right . Left $ "no discourse found for id: " <> show discourseId
             Just discourse -> do
               rezA <- Sm.summarizeDiscourseMessages dbPool httpManager discourse
               case rezA of
-                Left errs ->
-                  pure . Left $ head errs
+                Left errs -> pure . Left $ head errs
                 Right opResults ->
                   case opResults of
-                    Left errs ->
-                      pure . Right . Left $ L.intercalate "; " errs
-                    Right _ ->
-                      pure . Right $ Right ()
+                    Left errs -> pure . Right . Left $ L.intercalate "; " errs
+                    Right _ -> pure . Right $ Right ()
 
 
 generateElmFromItem :: OperFunction FilePath

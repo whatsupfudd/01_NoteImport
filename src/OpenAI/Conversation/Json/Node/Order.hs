@@ -171,10 +171,22 @@ renderOrdIssues conversation issues =
   T.unpack $ "@[renderOrdIssues] node issues.\ntitle: " <> conversation.titleCv
       <> "\neid: " <> conversation.convIdCv <> " => \n" <> T.intercalate "\n" (map renderOrdIssue issues)
 
-
+{-
+Kinds of OrdIssue:
+    MissingRootOI
+  | MultipleRootOI
+  | MissingNodeOI Text
+  | MissingParentOI Text Text
+  | CycleOI Text
+  | DuplicateChildOI Text Text
+  | BranchOI Text [Text]
+  | DebugInfo Text Text
+  deriving stock (Eq, Show)
+-}
 renderOrdIssue :: OrdIssue -> Text
 renderOrdIssue issue = "- " <> case issue of
   MissingRootOI -> "missing root node"
+  MultipleRootOI -> "multiple root nodes"
   MissingNodeOI eidNode -> "missing node in mapping: " <> eidNode
   MissingParentOI nodeEid parentEid -> "missing parent, child: " <> nodeEid <> ", parent: " <> parentEid
   CycleOI eidNode -> "cycle detected at node: " <> eidNode
@@ -183,3 +195,4 @@ renderOrdIssue issue = "- " <> case issue of
   BranchOI eidParent eidsChild ->
     "branch detected under parent = " <> eidParent <> " children = [" <> T.intercalate ", " eidsChild <> "]"
   DebugInfo label text -> "dbg " <> label <> ": " <> text
+  _ -> "@[renderOrdIssue] unknown issue: " <> (T.pack . show) issue

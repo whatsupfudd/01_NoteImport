@@ -182,11 +182,11 @@ loadDiscussionByUid pool uid = do
   case eiRez of
     Left err -> pure $ Left err
     Right Nothing -> pure . Right . Left $ "discussion not found for uid: " <> show uid
-    Right (Just (_, discUuid, _, _)) ->
-      Hp.use pool $ TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx discUuid)
+    Right (Just (_, eid, _, _)) ->
+      Hp.use pool $ TxS.transaction TxS.ReadCommitted TxS.Read (loadDiscussionTx eid)
 
 
-findDiscussionByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe UUID))
+findDiscussionByConvId :: Hp.Pool -> Text -> IO (Either String (Maybe (Int64, UUID)))
 findDiscussionByConvId pool convId =
   case Uu.fromString $ T.unpack convId of
     Nothing -> pure . Left $ "@findDiscussionByConvId] invalid UUID: " <> T.unpack convId
@@ -195,18 +195,18 @@ findDiscussionByConvId pool convId =
       case eiRezA of
         Left err -> pure . Left $ show err
         Right Nothing -> pure . Right $ Nothing
-        Right (Just (_, ctxUuid, _, _)) ->
-          pure . Right $ Just ctxUuid
+        Right (Just (discUid, ctxUuid, _, _)) ->
+          pure . Right $ Just (discUid, ctxUuid)
 
 
-findDiscussionByUid :: Hp.Pool -> Int64 -> IO (Either String (Maybe UUID))
+findDiscussionByUid :: Hp.Pool -> Int64 -> IO (Either String (Maybe (Int64, UUID)))
 findDiscussionByUid pool uid = do
   eiRez <- Hp.use pool $ Ses.statement uid St.selectDiscussionByUid
   case eiRez of
     Left err -> pure . Left $ show err
     Right Nothing -> pure . Right $ Nothing
-    Right (Just (_, ctxUuid, _, _)) ->
-      pure . Right $ Just ctxUuid
+    Right (Just (uid, eid, _, _)) ->
+      pure . Right $ Just (uid, eid)
 
 
 loadDiscussionTx :: UUID -> Tx.Transaction (Either String (Maybe DiscussionDb))

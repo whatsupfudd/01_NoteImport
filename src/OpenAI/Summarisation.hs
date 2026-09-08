@@ -115,11 +115,15 @@ summarizeMessageOneLine mgr content = do
     prefix =
         "As an expert in journalism, editorial reviews, legal affairs, dissertation analysis and information management,"
         <> " you are tasked by management with creating a short title for the following entry in a document that we'll integrate in the table of content.\n"
-        <> "Provide a short one-liner title for this entry, keep it within 20 words, be affirmative and use proper,"
-        <> " concise and descriptive English. Don't go into details, don't use markdown, don't quote your answer,"
+        <> "Provide a short one-liner title for this entry, ideally in less than 40 words, be affirmative and use proper,"
+        <> " concise and descriptive English. Don't go into details, don't use markdown, don't put single or double quotes in your answer,"
         <> " don't mention notes nor that it is a possible title.\n"
         <> "Example: <entry>The main idea of this section is to optimise the structure of the ecosystem.</entry>\n"
         <> "Summary: Ecosystem structural optimisation.\n"
+        <> "Example: <entry>The shortest path between two nodes is normally a straight line, but it is more complex in a general space.</entry>\n"
+        <> "Summary: Shortest path isn't always a straight line.\n"
+        <> "Counter-example: <entry>The shortest path between two nodes is normally a straight line, but it is more complex in a general space.</entry>\n"
+        <> "Summary: I think this is can be summarised as: \"Shortest path isn't always a straight line\".\n"
         <> "<entry>"
     postfix =
         "</entry>\nSummary:"

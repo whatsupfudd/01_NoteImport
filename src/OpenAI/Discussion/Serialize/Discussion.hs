@@ -63,8 +63,7 @@ storeDiscussion pool title convId ctx = do
   case Uu.fromString $ T.unpack convId of
     Nothing -> pure . Left $ "@storeDiscussion] invalid UUID: " <> T.unpack convId
     Just oaiid -> do
-      r <- Hp.use pool $
-        Tx.transaction Tx.ReadCommitted Tx.Write $ do
+      r <- Hp.use pool $ Tx.transaction Tx.ReadCommitted Tx.Write $ do
           (ctxUid, ctxUuid) <- Tx.statement (title, oaiid) St.insertDiscussion
 
           -- issues :: [Text]

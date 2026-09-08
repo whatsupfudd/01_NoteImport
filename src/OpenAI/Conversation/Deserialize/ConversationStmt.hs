@@ -47,10 +47,10 @@ type MmImgMdRow =
 
 type DalleRow = (Int64, Maybe Text, Text, Maybe Int32, Maybe Text, Maybe Text, Text)
 type GenerationRow = (Int64, Maybe Text, Text, Maybe Int32, Maybe Text, Int32, Int32, Bool, Text, Maybe Text)
-type AapRow = (Int64, Int64, Maybe Value, Text, Int64, Text, Maybe Text)
-type RtuavRow = (Int64, Int64, Maybe Value, Value, Maybe Value, Maybe Double)
+type AapRow = (Int64, Int64, Maybe Double, Text, Int64, Text, Maybe Text)
+type RtuavRow = (Int64, Int64, Maybe Double, Value, Maybe Value, Maybe Double)
 type AudioMetaRow =
-  (Int64, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Double, Double)
+  (Int64, Maybe Double, Maybe Double, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Maybe Value, Double, Double)
 
 
 fetchAllConversationsRows :: Statement () (Vector (Int64, Text))
@@ -662,7 +662,7 @@ selectAudioAssetPointerMmParts =
     select
       mp.uid :: int8,
       aap.uid :: int8,
-      aap.expiry_datetime :: jsonb?,
+      aap.expiry_datetime :: float8?,
       aap.asset_pointer :: text,
       aap.size_bytes :: int8,
       aap.format :: text,
@@ -682,8 +682,8 @@ selectAudioMetadataForAap =
   [TH.vectorStatement|
     select
       ma.assetptr_fk :: int8,
-      ma.start_timestamp :: jsonb?,
-      ma.end_timestamp :: jsonb?,
+      ma.start_timestamp :: float8?,
+      ma.end_timestamp :: float8?,
       ma.pretokenized_vq :: jsonb?,
       ma.interruptions :: jsonb?,
       ma.original_audio_source :: jsonb?,
@@ -709,7 +709,7 @@ selectRealTimeUserAVMmParts =
     select
       mp.uid :: int8,
       r.uid :: int8,
-      r.expiry_datetime :: jsonb?,
+      r.expiry_datetime :: float8?,
       r.frames_asset_pointers :: jsonb,
       r.video_container_asset_pointer :: jsonb?,
       r.audio_start_timestamp :: float8?
@@ -728,8 +728,8 @@ selectAudioMetadataForRtuav =
   [TH.vectorStatement|
     select
       ma.assetptr_fk :: int8,
-      ma.start_timestamp :: jsonb?,
-      ma.end_timestamp :: jsonb?,
+      ma.start_timestamp :: float8?,
+      ma.end_timestamp :: float8?,
       ma.pretokenized_vq :: jsonb?,
       ma.interruptions :: jsonb?,
       ma.original_audio_source :: jsonb?,
@@ -745,5 +745,5 @@ selectAudioMetadataForRtuav =
       join oai.nodes n on n.uid = m.node_fk
     where n.conversation_fk = $1 :: int8
       and ma.part_kind = 2
-    order by n.preorder_seq, n.seqnbr, m.seqnbr, c.seqnbr, mp.seqnbr, mp.uid, ma.uid
+    order by n.preorder_seq, n.seqnbr, m.seqnbr, c.seqnbr, mp.seqnbr, mp.uid, ma.start_stamp
   |]
