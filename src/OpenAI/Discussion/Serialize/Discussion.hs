@@ -32,7 +32,7 @@ import qualified Hasql.Transaction as Tx
 import qualified Hasql.Transaction.Sessions as Tx
 
 import qualified OpenAI.Conversation.Json.Schema as Jd
-import OpenAI.Types
+import OpenAI.Discussion.Types as Dt
 import Data.List (find)
 
 -- | useTx: helper to wrap a statement into a transaction.
@@ -58,20 +58,20 @@ useTx pool stmts = Hp.use pool (Tx.transaction Tx.ReadCommitted Tx.Write stmts) 
 --
 -- Returns the (context_uid, context_uuid) on success.
 -- Any failure rolls back the entire insert.
-storeDiscussion :: Hp.Pool -> Text -> Text -> Context -> IO (Either String (Int64, UUID))
-storeDiscussion pool title convId ctx = do
-  case Uu.fromString $ T.unpack convId of
-    Nothing -> pure . Left $ "@storeDiscussion] invalid UUID: " <> T.unpack convId
+storeDiscussion :: Hp.Pool -> Dt.Discussion -> IO (Either String (Int64, UUID))
+storeDiscussion pool disc = do
+  case Uu.fromString $ T.unpack disc.eid of
+    Nothing -> pure . Left $ "@storeDiscussion] invalid UUID: " <> T.unpack disc.eid
     Just oaiid -> do
       r <- Hp.use pool $ Tx.transaction Tx.ReadCommitted Tx.Write $ do
-          (ctxUid, ctxUuid) <- Tx.statement (title, oaiid) St.insertDiscussion
+          (ctxUid, ctxUuid) <- Tx.statement (disc.title, oaiid) St.insertDiscussion
 
           -- issues :: [Text]
-          forM_ (zip [1 :: Int32 ..] ctx.issues) $ \(i, t) ->
+          forM_ (zip [1 :: Int32 ..] disc.issues) $ \(i, t) ->
             Tx.statement (ctxUid, i, t) St.insertDiscussionIssue
 
           -- messages :: [MessageFsm]
-          inserted <- forM (zip [1 :: Int32 ..] (reverse ctx.messages)) $ \(i, m) -> do
+          inserted <- forM (zip [1 :: Int32 ..] (reverse disc.messages)) $ \(i, m) -> do
             let (kindTxt, createdTs, updatedTs) = messageHeaderData m
             msgUid <- Tx.statement (ctxUid, i, kindTxt, createdTs, updatedTs) St.insertMessage
 

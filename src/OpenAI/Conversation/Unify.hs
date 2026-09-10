@@ -8,46 +8,47 @@ import qualified Data.Text as T
 import qualified Data.Aeson as Ae
 
 import qualified OpenAI.Conversation.Json.Schema as Jd
-import OpenAI.Types
+import qualified OpenAI.Discussion.Types as Dt
+import qualified OpenAI.Conversation.Context as Ct
 
 
-runFSM :: Context -> [Jd.Message] -> Context
+runFSM :: Ct.Context -> [Jd.Message] -> Ct.Context
 runFSM context messages =
   foldr switchFsm context messages
   where
-  switchFsm :: Jd.Message -> Context -> Context
+  switchFsm :: Jd.Message -> Ct.Context -> Ct.Context
   switchFsm message context =
     case message.authorMsg.roleAu of
       "user" -> handleUserMsg context message
       "assistant" -> handleAssistantMsg context message
       "system" -> handleSystemMsg context message
       "tool" -> handleToolMsg context message
-      _ -> context { issues = "unknown role: " <> message.authorMsg.roleAu : context.issues }
+      _ -> context { Ct.issues = "unknown role: " <> message.authorMsg.roleAu : context.issues }
 
 
-handleUserMsg :: Context -> Jd.Message -> Context
+handleUserMsg :: Ct.Context -> Jd.Message -> Ct.Context
 handleUserMsg context message =
   case message.contentMsg of
     Jd.TextCT parts ->
       let
-        userMsg = UserMessage {
+        userMsg = Dt.UserMessage {
           textUM = T.intercalate " |<part>| " parts.partsTP
           , attachmentsUM = []
         }
-        timing = Timing {
+        timing = Dt.Timing {
           createTime = Just message.createTimeMsg
           , updateTime = message.updateTimeMsg
         }
-        updCtxt = context { messages = UserMF timing userMsg : context.messages }
+        updCtxt = context { Ct.messages = Dt.UserMF timing userMsg : context.messages }
       in
       updCtxt
-    _ -> context { issues = "user msg id: " <> message.idMsg <> " unknown content type: " <> T.pack (show message.contentMsg) : context.issues }
+    _ -> context { Ct.issues = "user msg id: " <> message.idMsg <> " unknown content type: " <> T.pack (show message.contentMsg) : context.issues }
 
 
-handleAssistantMsg :: Context -> Jd.Message -> Context
+handleAssistantMsg :: Ct.Context -> Jd.Message -> Ct.Context
 handleAssistantMsg context message =
   let
-    timing = Timing {
+    timing = Dt.Timing {
       createTime = Just message.createTimeMsg
       , updateTime = message.updateTimeMsg
     }
@@ -56,25 +57,25 @@ handleAssistantMsg context message =
     case context.currentMsg of
       Nothing ->
         let
-          assistantMsg = AssistantMessage {
+          assistantMsg = Dt.AssistantMessage {
             response = Just $ buildAssistantResponse Nothing message
             , attachmentsAM = []
             , subActions = []
           }
         in
-        context { messages = AssistantMF timing assistantMsg : context.messages }
+        context { Ct.messages = Dt.AssistantMF timing assistantMsg : context.messages }
       Just astMsg ->
         let
           updMsg = case astMsg of
-            AssistantMF timing prevMsg ->
-              AssistantMF timing prevMsg {
-                  subActions = reverse prevMsg.subActions
-                  , response = Just $ buildAssistantResponse (Just prevMsg) message
+            Dt.AssistantMF timing prevMsg ->
+              Dt.AssistantMF timing prevMsg {
+                  Dt.subActions = reverse prevMsg.subActions
+                  , Dt.response = Just $ buildAssistantResponse (Just prevMsg) message
                 }
             -- TODO: handle a current message being non-assistant:
             _ -> astMsg
         in
-        context { messages = updMsg : context.messages, currentMsg = Nothing }
+        context { Ct.messages = updMsg : context.messages, Ct.currentMsg = Nothing }
   else  -- Not end-turn situation:
     case message.contentMsg of
       Jd.CodeCT codePl -> codeP timing codePl.languageCP codePl.responseFormatNameCP codePl.textCP
@@ -103,84 +104,84 @@ handleAssistantMsg context message =
       Jd.ThoughtsCT tContent -> thoughtsP timing tContent.thoughtsTP tContent.sourceAnalysisMsgIdTP
       Jd.OtherCT valueMap ->
         context
-      _ -> context { issues = "assistant msg id: " <> message.idMsg <> " unknown content type: " <> T.pack (show message.contentMsg) : context.issues }
+      _ -> context { Ct.issues = "assistant msg id: " <> message.idMsg <> " unknown content type: " <> T.pack (show message.contentMsg) : context.issues }
   where
-  codeP :: Timing -> Text -> Maybe Text -> Text -> Context
+  codeP :: Dt.Timing -> Text -> Maybe Text -> Text -> Ct.Context
   codeP timing language responseFormatName text =
     let
-      subAction = CodeSA Code {
-        languageCC = language
-        , responseFormatNameCC = responseFormatName
-        , textCC = text
+      subAction = Dt.CodeSA Dt.Code {
+        Dt.languageCC = language
+        , Dt.responseFormatNameCC = responseFormatName
+        , Dt.textCC = text
       }
       ieNewMsg = case context.currentMsg of
         Just prevMsg ->
           case prevMsg of
-            AssistantMF timing assistantMsg ->
-              Right $ AssistantMF timing assistantMsg { subActions = subAction : assistantMsg.subActions }
+            Dt.AssistantMF timing assistantMsg ->
+              Right $ Dt.AssistantMF timing assistantMsg { Dt.subActions = subAction : assistantMsg.subActions }
             _ -> Left $ "assistant msg id: " <> message.idMsg <> " is not an assistant message: " <> T.pack (show prevMsg)
-        Nothing -> Right $ AssistantMF timing (AssistantMessage {
+        Nothing -> Right $ Dt.AssistantMF timing (Dt.AssistantMessage {
               response = Just $ buildAssistantResponse Nothing message
               , attachmentsAM = []
               , subActions = [ subAction ]
             })
     in
     case ieNewMsg of
-      Left errMsg -> context { issues = errMsg : context.issues }
-      Right newMsg -> context { currentMsg = Just newMsg }
-  textP :: Timing -> [Text] -> Context
+      Left errMsg -> context { Ct.issues = errMsg : context.issues }
+      Right newMsg -> context { Ct.currentMsg = Just newMsg }
+  textP :: Dt.Timing -> [Text] -> Ct.Context
   textP timing parts =
     let
-      subAction = IntermediateSA (T.intercalate " |<part>| " parts)
+      subAction = Dt.IntermediateSA (T.intercalate " |<part>| " parts)
       ieNewMsg = case context.currentMsg of
         Just prevMsg ->
           case prevMsg of
-            AssistantMF timing assistantMsg ->
-              Right $ AssistantMF timing assistantMsg { subActions = subAction : assistantMsg.subActions }
+            Dt.AssistantMF timing assistantMsg ->
+              Right $ Dt.AssistantMF timing assistantMsg { Dt.subActions = subAction : assistantMsg.subActions }
             _ -> Left $ "assistant msg id: " <> message.idMsg <> " is not an assistant message: " <> T.pack (show prevMsg)
         Nothing ->
           let
-            assistantMsg = AssistantMessage {
+            assistantMsg = Dt.AssistantMessage {
               response = Just $ buildAssistantResponse Nothing message
               , attachmentsAM = []
               , subActions = [ subAction ]
             }
           in
-          Right $ AssistantMF timing assistantMsg
+          Right $ Dt.AssistantMF timing assistantMsg
     in
     case ieNewMsg of
-      Left errMsg -> context { issues = errMsg : context.issues }
-      Right newMsg -> context { currentMsg = Just newMsg }
-  thoughtsP :: Timing -> [Jd.ThoughtContent] -> Text -> Context
+      Left errMsg -> context { Ct.issues = errMsg : context.issues }
+      Right newMsg -> context { Ct.currentMsg = Just newMsg }
+  thoughtsP :: Dt.Timing -> [Jd.ThoughtContent] -> Text -> Ct.Context
   thoughtsP timing thoughts sourceAnalysisMsgId =
     let
       -- They need to be backward as we reverse the list later.
       subActions = map (\aThought ->
-        ReflectionSA Reflection {
-            summaryRF =  aThought.summaryTC
-          , contentRF = aThought.contentTC
-          , chunksRF = aThought.chunksTC
-          , finishedRF = Just aThought.finishedTC
+        Dt.ReflectionSA Dt.Reflection {
+            Dt.summaryRF =  aThought.summaryTC
+          , Dt.contentRF = aThought.contentTC
+          , Dt.chunksRF = aThought.chunksTC
+          , Dt.finishedRF = Just aThought.finishedTC
           }
         ) $ reverse thoughts
       ieNewMsg = case context.currentMsg of
         Just prevMsg ->
           case prevMsg of
-            AssistantMF timing assistantMsg ->
-              Right $ AssistantMF timing assistantMsg { subActions = subActions <> assistantMsg.subActions }
+            Dt.AssistantMF timing assistantMsg ->
+              Right $ Dt.AssistantMF timing assistantMsg { Dt.subActions = subActions <> assistantMsg.subActions }
             _ -> Left $ "assistant msg id: " <> message.idMsg <> " is not an assistant message: " <> T.pack (show prevMsg)
-        Nothing -> Right $ AssistantMF timing (AssistantMessage {
+        Nothing -> Right $ Dt.AssistantMF timing (Dt.AssistantMessage {
               response = Just $ buildAssistantResponse Nothing message
               , attachmentsAM = []
               , subActions = subActions
             })
     in
     case ieNewMsg of
-      Left errMsg -> context { issues = errMsg : context.issues }
-      Right newMsg -> context { currentMsg = Just newMsg }
+      Left errMsg -> context { Ct.issues = errMsg : context.issues }
+      Right newMsg -> context { Ct.currentMsg = Just newMsg }
 
 
-buildAssistantResponse :: Maybe AssistantMessage -> Jd.Message -> ResponseAst
+buildAssistantResponse :: Maybe Dt.AssistantMessage -> Jd.Message -> Dt.ResponseAst
 buildAssistantResponse mbAstMsg jsonMsg =
   case mbAstMsg of
     Just assistantMsg ->
@@ -188,68 +189,68 @@ buildAssistantResponse mbAstMsg jsonMsg =
     Nothing -> respFromContent jsonMsg.contentMsg
 
 
-respFromContent :: Jd.Content -> ResponseAst
+respFromContent :: Jd.Content -> Dt.ResponseAst
 respFromContent content =
   case content of
-    Jd.CodeCT codePl -> ResponseAst {
+    Jd.CodeCT codePl -> Dt.ResponseAst {
       textRA = "CodeContent: " <> codePl.textCP
     }
-    Jd.ExecutionOutputCT execOutput -> ResponseAst {
+    Jd.ExecutionOutputCT execOutput -> Dt.ResponseAst {
       textRA = "ExecutionOutputContent: " <> execOutput.textEO
     }
-    Jd.ModelEditableContextCT modelCtx -> ResponseAst {
+    Jd.ModelEditableContextCT modelCtx -> Dt.ResponseAst {
       textRA = "ModelEditableContent: " <> modelCtx.modelSetMEC
     }
-    Jd.MultimodalTextCT mmText -> ResponseAst {
+    Jd.MultimodalTextCT mmText -> Dt.ResponseAst {
       textRA = "MultimodalTextContent: " <> T.intercalate " |<part>| " (map (T.pack . show) mmText.partsMmt)
     }
-    Jd.ReasoningRecapCT reasoningRecap -> ResponseAst {
+    Jd.ReasoningRecapCT reasoningRecap -> Dt.ResponseAst {
       textRA = "ReasoningRecapContent: " <> reasoningRecap.contentRR
     }
-    Jd.SystemErrorCT sysError -> ResponseAst {
+    Jd.SystemErrorCT sysError -> Dt.ResponseAst {
       textRA = "SystemErrorContent: " <> sysError.nameSER <> " " <> sysError.textSER
     }
-    Jd.TetherBrowsingDisplayCT tBrowsing -> ResponseAst {
+    Jd.TetherBrowsingDisplayCT tBrowsing -> Dt.ResponseAst {
       textRA = "TetherBrowsingDisplayContent: " <> tBrowsing.resultTbd <> " " <> (T.pack . show) tBrowsing.summaryTbd <> " " <> (T.pack . show) tBrowsing.assetsTbd <> " " <> fromMaybe "No tetherID" tBrowsing.tetherIDTbd
     }
-    Jd.TetherQuoteCT tQuote -> ResponseAst {
+    Jd.TetherQuoteCT tQuote -> Dt.ResponseAst {
       textRA = "TetherQuoteContent: " <> tQuote.urlTq <> " " <> tQuote.domainTq <> " " <> tQuote.textTq <> " " <> tQuote.titleTq <> " " <> fromMaybe "No tetherID" tQuote.tetherIDTq
     }
-    Jd.TextCT parts -> ResponseAst {
+    Jd.TextCT parts -> Dt.ResponseAst {
       textRA = T.intercalate " |<part>| " parts.partsTP
     }
-    Jd.ThoughtsCT tContent -> ResponseAst {
+    Jd.ThoughtsCT tContent -> Dt.ResponseAst {
       textRA = "ThoughtsContent: " <> tContent.sourceAnalysisMsgIdTP
     }
-    Jd.OtherCT valueMap -> ResponseAst {
+    Jd.OtherCT valueMap -> Dt.ResponseAst {
       textRA = "OtherContent: " <> valueMap.contentTypeOpl <> " " <> (T.pack . show) valueMap.rawOpl
     }
-    _ -> ResponseAst {
+    _ -> Dt.ResponseAst {
       textRA = "UnknownContent: " <> (T.pack . show) content
     }
 
-handleSystemMsg :: Context -> Jd.Message -> Context
+handleSystemMsg :: Ct.Context -> Jd.Message -> Ct.Context
 handleSystemMsg context message =
   let
-    systemMsg = SystemMessage {
+    systemMsg = Dt.SystemMessage {
       textSM = (T.pack . show) message.contentMsg
     }
-    timing = Timing {
+    timing = Dt.Timing {
       createTime = Just message.createTimeMsg
       , updateTime = message.updateTimeMsg
     }
   in
-  context { messages = SystemMF timing systemMsg : context.messages }
+  context { Ct.messages = Dt.SystemMF timing systemMsg : context.messages }
 
-handleToolMsg :: Context -> Jd.Message -> Context
+handleToolMsg :: Ct.Context -> Jd.Message -> Ct.Context
 handleToolMsg context message =
   let
-    toolMsg = ToolMessage {
+    toolMsg = Dt.ToolMessage {
       textTM = (T.pack . show) message.contentMsg
     }
-    timing = Timing {
+    timing = Dt.Timing {
       createTime = Just message.createTimeMsg
       , updateTime = message.updateTimeMsg
     }
   in
-  context { messages = ToolMF timing toolMsg : context.messages }
+  context { Ct.messages = Dt.ToolMF timing toolMsg : context.messages }

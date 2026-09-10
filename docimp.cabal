@@ -46,6 +46,7 @@ library
       OpenAI.Content.Types
       OpenAI.Content.Write
       OpenAI.Conversation
+      OpenAI.Conversation.Context
       OpenAI.Conversation.Deserialize.ContentStmt
       OpenAI.Conversation.Deserialize.Conversation
       OpenAI.Conversation.Deserialize.ConversationStmt
@@ -84,6 +85,7 @@ library
       OpenAI.Discussion.Serialize.Discussion
       OpenAI.Discussion.Serialize.DiscussionIncr
       OpenAI.Discussion.Serialize.DiscussionStmt
+      OpenAI.Discussion.Types
       OpenAI.Generate.Docx
       OpenAI.Generate.DocxDb
       OpenAI.Generate.DocxGeneral
@@ -102,7 +104,6 @@ library
       OpenAI.ProjFetcher
       OpenAI.Summarisation
       OpenAI.Time
-      OpenAI.Types
       OpenAI.Utils
       Options
       Options.Cli

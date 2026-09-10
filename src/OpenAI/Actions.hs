@@ -401,8 +401,8 @@ convDeserialize targets destPath pgPool = do
                   case Ccv.analyzeConversation convDb of
                     Left errMsgA ->
                       pure . Right . Left $ T.unpack errMsgA
-                    Right context -> do
-                      rezA <- Gd.writeContextDocx context convDb.titleCv (destPath </> T.unpack convDb.eidCv <> ".docx")
+                    Right discussion -> do
+                      rezA <- Gd.writeContextDocx discussion (destPath </> T.unpack convDb.eidCv <> ".docx")
                       case rezA of
                         Left errMsgB -> do
                           putStrLn $ "@[convertConversation] error: " <> errMsgB
@@ -481,7 +481,7 @@ convStoreADiscussion pgPool target = do
               -}
               case Ccv.analyzeConversation convDb of
                 Left errMsgA -> pure . Right . Left $ T.unpack errMsgA
-                Right context -> do
+                Right discussion -> do
                   -- putStrLn $ "@[convStoreDiscussion] context: " <> show context
                   rezB <- Ddc.findDiscussionByConvId pgPool convDb.eidCv
                   case rezB of
@@ -491,7 +491,7 @@ convStoreADiscussion pgPool target = do
                     Right mbIds ->
                       case mbIds of
                         Nothing -> do
-                          rezA <- Sdc.storeDiscussion pgPool convDb.titleCv convDb.eidCv context
+                          rezA <- Sdc.storeDiscussion pgPool discussion
                           case rezA of
                             Left errMsgB -> do
                               putStrLn $ "@[convertConversation] error: " <> errMsgB
@@ -624,10 +624,10 @@ genDocxFromConvs conversations =
   makeDocX :: Mp.Map Text GfTarget -> Js.Conversation -> IO ()
   makeDocX _ conversation =
     let
-      context = Op.analyze conversation
+      discussion = Op.analyze conversation
     in do
     let outPath = "/tmp/" <> T.unpack conversation.oaiIdCv <> ".docx"
-    _ <- Gd.writeContextDocx context conversation.titleCv outPath
+    _ <- Gd.writeContextDocx discussion outPath
     putStrLn $ "@[genDocx] wrote to " <> outPath
 
 
@@ -640,8 +640,8 @@ storeDiscussions conversations dbPool = do
   storeDiscussion _ conversation = do
     putStrLn . T.unpack $ "Title: " <> conversation.titleCv <> ", id: " <> conversation.oaiIdCv
     let
-      context = Op.analyze conversation
-    rez <- Sdc.storeDiscussion dbPool conversation.titleCv conversation.oaiIdCv context
+      discussion = Op.analyze conversation
+    rez <- Sdc.storeDiscussion dbPool discussion
     case rez of
       Left err -> putStrLn $ "@[storeDiscussions] error: " <> err
       Right _ -> putStrLn $ "@[storeDiscussions] stored discussion: " <> T.unpack conversation.titleCv

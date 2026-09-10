@@ -12,7 +12,7 @@ import qualified Data.Map.Strict as Mp
 import qualified Hasql.Pool as Hp
 import qualified Network.HTTP.Client as Ht
 import qualified OpenAI.Import.Run as Run
-import qualified OpenAI.Import.Types as Typ
+import qualified OpenAI.Import.Types as It
 import qualified OpenAI.Import.Report as Rpt
 import qualified OpenAI.Conversation.Json.Schema as Jd
 
@@ -28,7 +28,7 @@ data BatchAcc = BatchAcc
   , repsAcc :: [(Int, Rpt.Report)]
   }
 
-runBatch :: Maybe Ht.Manager -> Hp.Pool -> Typ.Source -> Typ.Opts -> [(Jd.Conversation, Text)]
+runBatch :: Maybe Ht.Manager -> Hp.Pool -> It.Source -> It.Opts -> [(Jd.Conversation, Text)]
     -> IO (Either [Hp.UsageError] Rpt.BatchReport)
 runBatch mgr pool source opts convs =
   let
@@ -120,7 +120,7 @@ pushHalted reason convsIx acc =
 
 
 isHardFail :: Rpt.Report -> Bool
-isHardFail rpt = rpt.action == Typ.FailA
+isHardFail rpt = rpt.action == It.FailA
 
 
 dupReport :: ConvIx -> ConvIx -> Rpt.Report
@@ -129,7 +129,7 @@ dupReport convDrop convKeep =
     { eidConv = convDrop.convInp.oaiIdCv
     , uidConv = Nothing
     , uidDisc = Nothing
-    , action = Typ.SkipSameA
+    , action = It.SkipSameA
     , count = Rpt.emptyCount { Rpt.skipCnt = 1 }
     , notes =
         [ Rpt.WarnN $
@@ -144,7 +144,7 @@ dbErrReport conv dbErr =
     { eidConv = conv.oaiIdCv
     , uidConv = Nothing
     , uidDisc = Nothing
-    , action = Typ.FailA
+    , action = It.FailA
     , count = Rpt.emptyCount { Rpt.failCnt = 1 }
     , notes =
         [ Rpt.ErrorN $
@@ -159,7 +159,7 @@ haltedReport conv reason =
     { eidConv = conv.oaiIdCv
     , uidConv = Nothing
     , uidDisc = Nothing
-    , action = Typ.SkipSameA
+    , action = It.SkipSameA
     , count = Rpt.emptyCount { Rpt.skipCnt = 1 }
     , notes = [Rpt.WarnN ("not executed: " <> reason)]
     }

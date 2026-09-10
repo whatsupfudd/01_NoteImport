@@ -59,8 +59,7 @@ import OpenAI.Discussion.Deserialize.Discussion
   , IssueDb(..)
   )
 import qualified OpenAI.Discussion.Deserialize.Discussion as InO
-import OpenAI.Types (OaiCodeJson(..))
-
+import qualified OpenAI.Discussion.Types as Dt
 
 -- ---------------------------------
 -- Public API
@@ -244,7 +243,7 @@ subActionDbToElm sa =
         CodeBody { languageCb = lang, formatNameCb = fmt, textCb = txt } ->
           case T.toLower lang of
             "json" ->
-              case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 txt) :: Either String OaiCodeJson of
+              case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 txt) :: Either String Dt.OaiCodeJson of
                 Left err ->
                   "T.Error " <> elmTriple ("CodeSA: json err: " <> T.pack err)
                 Right oaiCodeJson ->

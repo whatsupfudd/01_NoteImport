@@ -17,10 +17,11 @@ import qualified OpenAI.Conversation.Json.V1.Schema as Jv1
 import qualified OpenAI.Conversation.Json.Node as Nd
 import qualified OpenAI.Conversation.Unify as Ju
 import qualified OpenAI.Conversation.Json.MsgSchema as Jm
-import OpenAI.Types
+import OpenAI.Discussion.Types as Dt
+import qualified OpenAI.Conversation.Context as Ct
 
 
-analyzeV1 :: Jv1.Conversation -> Either Text Context
+analyzeV1 :: Jv1.Conversation -> Either Text Ct.Context
 analyzeV1 v1Conv =
   let
     -- rootChild = Mp.lookup "client-created-root" discussion.mappingCv
@@ -28,14 +29,14 @@ analyzeV1 v1Conv =
   in
   case mbRootNode of
     Just rootNode ->
-      Right $ runFSM initContext v1Conv.nodeMapCv rootNode.idNd
+      Right $ runFSM Ct.initContext v1Conv.nodeMapCv rootNode.idNd
     Nothing -> Left $ "@[analyzeDiscussion] no root node found for discussion: " <> v1Conv.titleCv <> ", id: " <> v1Conv.convIdCv
 
 
-runFSM :: Context -> Mp.Map Text Nd.Node -> Text -> Context
+runFSM :: Ct.Context -> Mp.Map Text Nd.Node -> Text -> Ct.Context
 runFSM context mapping nodeID =
   case Mp.lookup nodeID mapping of
-    Nothing -> context { issues = "node not found: " <> nodeID : context.issues }
+    Nothing -> context { Ct.issues = ("node not found: " <> nodeID) : context.issues }
     Just node ->
       let
         updCtxt = case node.messageNd of
@@ -45,7 +46,7 @@ runFSM context mapping nodeID =
               "assistant" -> Ju.handleAssistantMsg context message
               "system" -> Ju.handleSystemMsg context message
               "tool" -> Ju.handleToolMsg context message
-              _ -> context { issues = "unknown role: " <> message.authorMsg.roleAu : context.issues }
+              _ -> context { Ct.issues = ("unknown role: " <> message.authorMsg.roleAu) : context.issues }
           Nothing -> context
             -- context { issues = "no message found: " <> nodeID : context.issues }
       in

@@ -34,11 +34,9 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Types.Header (hContentType)
 
-
 import qualified OpenAI.Conversation.Process as Cp
-import OpenAI.Types
 import OpenAI.Generate.DocxGeneral
-
+import qualified OpenAI.Discussion.Types as Dt
 
 -- | Generate a DOCX file from a 'Context'.
 --
@@ -48,11 +46,11 @@ import OpenAI.Generate.DocxGeneral
 --
 -- This is intentionally conservative: it prefers fidelity/clarity over
 -- “trying too hard” to convert complex HTML into Word layout.
-writeContextDocx :: Context -> Text -> FilePath -> IO (Either String ())
-writeContextDocx context title outPath = do
+writeContextDocx :: Dt.Discussion -> FilePath -> IO (Either String ())
+writeContextDocx discussion outPath = do
   httpManager <- newOllamaManager
   e <- P.runIO $ do
-    pd0 <- contextToPandoc httpManager title context
+    pd0 <- contextToPandoc httpManager discussion
     let pd1 = normalizePandoc pd0
     bs <- P.writeDocx writerOpts pd1
     liftIO $ BL.writeFile outPath bs
@@ -63,21 +61,21 @@ writeContextDocx context title outPath = do
 -- Pandoc construction
 -- -------------------------------
 
-contextToPandoc :: Manager -> Text -> Context -> P.PandocIO P.Pandoc
-contextToPandoc httpManager title context = do
-  msgBlocks <- concat <$> forM (zip [1 :: Int ..] (reverse context.messages)) (uncurry (messageToBlocks httpManager))
+contextToPandoc :: Manager -> Dt.Discussion -> P.PandocIO P.Pandoc
+contextToPandoc httpManager discussion = do
+  msgBlocks <- concat <$> forM (zip [1 :: Int ..] (reverse discussion.messages)) (uncurry (messageToBlocks httpManager))
 
   let
-    issueBlocks = if null context.issues then
+    issueBlocks = if null discussion.issues then
         []
       else
         [ P.Header 1 (mkIdAttr "issues") [P.Str "Issues"]
-        , P.BulletList (map (\t -> [P.Para [P.Str t]]) context.issues)
+        , P.BulletList (map (\t -> [P.Para [P.Str t]]) discussion.issues)
         ]
 
   let
     meta = P.Meta (Mp.fromList [
-          ("title", P.MetaInlines [P.Str title])
+          ("title", P.MetaInlines [P.Str discussion.title])
           , ("authors", P.MetaList [])
           , ("date", P.MetaString "")
       ])
@@ -92,12 +90,12 @@ contextToPandoc httpManager title context = do
       )
 
 
-messageToBlocks :: Manager -> Int -> MessageFsm -> P.PandocIO [P.Block]
+messageToBlocks :: Manager -> Int -> Dt.MessageFsm -> P.PandocIO [P.Block]
 messageToBlocks httpManager idx msg = do
   let anchor = "msg-" <> T.pack (show idx)
 
   case msg of
-    UserMF t um -> do
+    Dt.UserMF t um -> do
       body <- parseMarkdownBlocks um.textUM
       -- eiSummary <- liftIO $ summarizeOneLineTOC httpManager um.textUM
       let
@@ -111,7 +109,7 @@ messageToBlocks httpManager idx msg = do
           <> [styledDiv "GF Q Body" body]
           <> attachments
 
-    AssistantMF t am -> do
+    Dt.AssistantMF t am -> do
       -- Primary assistant response
       let
         mainText = maybe "" (\rep -> rep.textRA) am.response
@@ -154,7 +152,7 @@ messageToBlocks httpManager idx msg = do
       pure [header, styledDiv "GF Unknown Body" body]
     -}
 
-messageHeader :: Text -> Timing -> Text -> P.Block
+messageHeader :: Text -> Dt.Timing -> Text -> P.Block
 messageHeader role timing anchorId =
   P.Header 2 (mkIdAttr anchorId)
     [ P.Str role
@@ -174,10 +172,10 @@ attachmentsBlocks xs =
   ]
 
 
-subActionsBlocks :: [SubAction] -> P.PandocIO [P.Block]
+subActionsBlocks :: [Dt.SubAction] -> P.PandocIO [P.Block]
 subActionsBlocks sas = fmap concat $ forM sas $ \case
     -- We keep reflections in the export, but clearly marked.
-    ReflectionSA rf -> do
+    Dt.ReflectionSA rf -> do
       body <- parseMarkdownBlocks rf.contentRF
       pure
         [ P.Header 3 P.nullAttr [P.Str "Reflection"]
@@ -185,10 +183,10 @@ subActionsBlocks sas = fmap concat $ forM sas $ \case
         ]
 
     -- Code actions become code blocks, with language captured.
-    CodeSA cc ->
+    Dt.CodeSA cc ->
       case cc.languageCC of
         "json" ->
-          case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 cc.textCC) :: Either String OaiCodeJson of
+          case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 cc.textCC) :: Either String Dt.OaiCodeJson of
             Left err -> pure [
               P.Header 3 P.nullAttr [P.Str "CodeSA"]
               , P.Para [P.Str (cc.languageCC <> " err: " <> Cp.sanitizeText (T.pack err))]
@@ -214,7 +212,7 @@ subActionsBlocks sas = fmap concat $ forM sas $ \case
         _ ->
           case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 cc.textCC) :: Either String CodeQuerySearch of
             Left err -> pure [
-                P.Header 3 nullAttr [P.Str ("Code (" <> languageCC cc <> ")")]
+                P.Header 3 nullAttr [P.Str ("Code (" <> Dt.languageCC cc <> ")")]
               , styledDiv "GF Code Block" [P.CodeBlock (codeAttr cc.languageCC) cc.textCC]
               ]
             Right query -> pure
@@ -224,7 +222,7 @@ subActionsBlocks sas = fmap concat $ forM sas $ \case
               ]
 
     -- Tool calls: keep inputs for audit/repro.
-    ToolCallSA tc ->
+    Dt.ToolCallSA tc ->
       pure
         [ P.Header 3 nullAttr [P.Str "Tool call"]
         , P.Para [P.Strong [P.Str "Tool:"], P.Space, P.Code nullAttr tc.toolNameTC]
@@ -232,7 +230,7 @@ subActionsBlocks sas = fmap concat $ forM sas $ \case
         ]
 
     -- Intermediate notes: plain paragraphs.
-    IntermediateSA t -> do
+    Dt.IntermediateSA t -> do
       body <- parseMarkdownBlocks t
       pure
         [ P.Header 3 nullAttr [P.Str "Intermediate"]

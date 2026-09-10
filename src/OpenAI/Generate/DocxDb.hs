@@ -31,8 +31,6 @@ import qualified Text.Pandoc.Options as Po
 import Text.Pandoc.Walk (walk)
 
 import qualified OpenAI.Conversation.Process as Cp
-import OpenAI.Types (OaiCodeJson(..))
-
 import OpenAI.Discussion.Deserialize.Discussion
   ( DiscussionDb(..)
   , MessageDb(..)
@@ -44,8 +42,8 @@ import OpenAI.Discussion.Deserialize.Discussion
   , SubActionBodyDb(..)
   , IssueDb(..)
   )
-
 import OpenAI.Generate.DocxGeneral
+import qualified OpenAI.Discussion.Types as Dt
 
 -- -------------------------------
 -- Public API
@@ -213,7 +211,7 @@ subActionsBlocksDb v = fmap concat $ forM (V.toList v) $ \sa ->
         CodeBody lang fmt txt ->
           case T.toLower lang of
             "json" ->
-              case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 txt) :: Either String OaiCodeJson of
+              case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 txt) :: Either String Dt.OaiCodeJson of
                 Left err ->
                   pure
                     [ P.Header 3 P.nullAttr [P.Str "Code"]

@@ -21,7 +21,7 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Types.Header (hContentType)
 
-import OpenAI.Types
+import qualified OpenAI.Discussion.Types as Dt
 
 
 parseMarkdownBlocks :: Text -> P.PandocIO [P.Block]
@@ -160,8 +160,8 @@ renderUtc utc =
   T.pack (formatTime defaultTimeLocale "%y-%m-%d %H:%M:%S" utc)
 
 
-renderTiming :: Timing -> Text
-renderTiming (Timing c u) =
+renderTiming :: Dt.Timing -> Text
+renderTiming (Dt.Timing c u) =
   case (c, u) of
     (Just ct, _) -> renderEpoch ct
     (Nothing, Just ut) -> "(upd) " <> renderEpoch ut
@@ -264,7 +264,7 @@ fallbackOneLine =
   . T.take 600
   . T.strip
 
-messageHeaderWithSummary :: Text -> Timing -> Text -> Text -> P.Block
+messageHeaderWithSummary :: Text -> Dt.Timing -> Text -> Text -> P.Block
 messageHeaderWithSummary role timing anchorId tocLine =
   P.Header 2 (mkIdAttr anchorId)
     [ P.Str tocLine

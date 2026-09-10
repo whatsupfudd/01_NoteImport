@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
-module OpenAI.Types where
+module OpenAI.Discussion.Types where
 
 import Data.Scientific (Scientific)
 import Data.Text (Text)
@@ -8,19 +8,12 @@ import GHC.Generics (Generic)
 import qualified Data.Aeson as Ae
 
 
-data Context = Context {
-  messages :: [ MessageFsm ]
-  , currentMsg :: Maybe MessageFsm
+data Discussion = Discussion {
+  title :: Text
+  , eid :: Text
+  , messages :: [ MessageFsm ]
   , issues :: [ Text ]
 } deriving (Show)
-
-
-initContext :: Context
-initContext = Context {
-  messages = []
-  , currentMsg = Nothing
-  , issues = []
-}
 
 
 data MessageFsm =

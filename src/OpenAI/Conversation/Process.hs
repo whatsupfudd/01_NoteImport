@@ -15,7 +15,8 @@ import qualified Data.Aeson as Ae
 import qualified Options.Runtime as Rto
 import qualified OpenAI.Conversation.Json.Schema as Jd
 import OpenAI.Conversation.Unify (runFSM)
-import OpenAI.Types
+import qualified OpenAI.Conversation.Context as Ct
+import qualified OpenAI.Discussion.Types as Dt
 
 
 toText :: Jd.Conversation -> (Text, [Text])
@@ -42,40 +43,43 @@ toElm conversation =
     _ -> Left $ "@[toElm] issues: " <> T.intercalate ", " context.issues
 
 
-analyze :: Jd.Conversation -> Context
+analyze :: Jd.Conversation -> Dt.Discussion
 analyze conversation =
   -- Always succeed since the errors are accumulated in the context.
-  runFSM initContext conversation.messagesCv
+  let
+    rawCtxt = runFSM Ct.initContext conversation.messagesCv
+  in
+  Dt.Discussion { title = conversation.titleCv, eid = conversation.oaiIdCv, messages = rawCtxt.messages, issues = rawCtxt.issues }
 
 
-showMessage :: MessageFsm -> Text
+showMessage :: Dt.MessageFsm -> Text
 showMessage message =
   let
     basicText =
       case message of
-        UserMF timing userMsg -> "---- User ---\n" <> userMsg.textUM
-        AssistantMF timing assistantMsg -> "---- Assistant ---\n"
+        Dt.UserMF timing userMsg -> "---- User ---\n" <> userMsg.textUM
+        Dt.AssistantMF timing assistantMsg -> "---- Assistant ---\n"
           <> showSubActions assistantMsg.subActions
           <> maybe "\nNo response" (\rep -> "\n>>> RESP >>>\n" <> rep.textRA) assistantMsg.response
-        SystemMF timing systemMsg -> "---- System ---\n" <> systemMsg.textSM
-        ToolMF timing toolMsg -> "---- Tool ---\n" <> toolMsg.textTM
-        UnknownMF timing unknownMsg -> "---- Unknown ---\n" <> unknownMsg.textUM
+        Dt.SystemMF timing systemMsg -> "---- System ---\n" <> systemMsg.textSM
+        Dt.ToolMF timing toolMsg -> "---- Tool ---\n" <> toolMsg.textTM
+        Dt.UnknownMF timing unknownMsg -> "---- Unknown ---\n" <> unknownMsg.textUM
   in
   basicText <> "\n"
 
 
-messageToElm :: MessageFsm -> Int -> Text
+messageToElm :: Dt.MessageFsm -> Int -> Text
 messageToElm message index =
   let
     msgID = "msg_" <> T.pack (show index)
   in
   case message of
-    UserMF timing userMsg -> "{ id = \""
+    Dt.UserMF timing userMsg -> "{ id = \""
         <> msgID
         <> "\", kind = T.Question, title = \""
         <> msgID
         <> "\", body = [ T.Basic \"\"\"" <> sanitizeText userMsg.textUM <> "\"\"\"] }"
-    AssistantMF timing assistantMsg ->
+    Dt.AssistantMF timing assistantMsg ->
       let
         content = map subActionToElm assistantMsg.subActions
             <> [ "T.LineSep"
@@ -89,10 +93,10 @@ messageToElm message index =
     _ -> ""
 
 
-subActionToElm :: SubAction -> Text
+subActionToElm :: Dt.SubAction -> Text
 subActionToElm subAction =
   case subAction of
-    IntermediateSA text ->
+    Dt.IntermediateSA text ->
       let
         strContent = if text == "" then
             "\"\""
@@ -100,10 +104,10 @@ subActionToElm subAction =
             "\"\"\"" <> sanitizeText text <> "\"\"\""
       in
       "T.Intermediate " <> strContent
-    ReflectionSA reflection -> "T.Reflect \"" <> sanitizeText reflection.summaryRF <> "\""
+    Dt.ReflectionSA reflection -> "T.Reflect \"" <> sanitizeText reflection.summaryRF <> "\""
         <> "\"\"\"" <> sanitizeText reflection.contentRF <> "\"\"\""
-    CodeSA code -> case code.languageCC of
-      "json" -> case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 code.textCC) :: Either String OaiCodeJson of
+    Dt.CodeSA code -> case code.languageCC of
+      "json" -> case Ae.eitherDecode (Bl.fromStrict $ TE.encodeUtf8 code.textCC) :: Either String Dt.OaiCodeJson of
         Left err -> "T.Error \"CodeSA: " <> code.languageCC <> " err: " <> sanitizeText (T.pack err) <> "\""
         Right oaiCodeJson -> case oaiCodeJson.typeOJ of
           "document" -> "T.Document \"\"\"" <> sanitizeText oaiCodeJson.contentOJ <> "\"\"\""
@@ -111,24 +115,24 @@ subActionToElm subAction =
               <> oaiCodeJson.typeOJ <> "\n" <> sanitizeText oaiCodeJson.contentOJ <> "\"\"\""
       _ -> "T.Error \"\"\"CodeSA: " <> code.languageCC <> "\n"
             <> fromMaybe "No response format name" code.responseFormatNameCC <> "\n" <> sanitizeText code.textCC <> "\"\"\""
-    ToolCallSA toolCall -> "T.ToolCall \"\"\"" <> toolCall.toolNameTC <> "\n" <> sanitizeText toolCall.toolInputTC <> "\"\"\""
+    Dt.ToolCallSA toolCall -> "T.ToolCall \"\"\"" <> toolCall.toolNameTC <> "\n" <> sanitizeText toolCall.toolInputTC <> "\"\"\""
     _ -> "T.Error \"UnknownSubAction: " <> T.pack (show subAction) <> "\""
 
 
-showSubActions :: [SubAction] -> Text
+showSubActions :: [Dt.SubAction] -> Text
 showSubActions subActions =
   case subActions of
     [] -> ""
     _ -> "---- SubActions ---\n" <> T.intercalate "\n" (map showSubAction subActions)
 
 
-showSubAction :: SubAction -> Text
+showSubAction :: Dt.SubAction -> Text
 showSubAction subAction =
   case subAction of
-    IntermediateSA text -> "---- Intermediate ---\n" <> text
-    ReflectionSA reflection -> "---- Reflection ---\n" <> reflection.summaryRF <> "\n" <> reflection.contentRF <> "\n" <> T.pack (show reflection.chunksRF) <> "\n" <> T.pack (show reflection.finishedRF)
-    CodeSA code -> "---- Code ---\n" <> code.languageCC <> "\n" <> maybe "No response format name" id code.responseFormatNameCC <> "\n" <> code.textCC
-    ToolCallSA toolCall -> "---- ToolCall ---\n" <> toolCall.toolNameTC <> "\n" <> toolCall.toolInputTC
+    Dt.IntermediateSA text -> "---- Intermediate ---\n" <> text
+    Dt.ReflectionSA reflection -> "---- Reflection ---\n" <> reflection.summaryRF <> "\n" <> reflection.contentRF <> "\n" <> T.pack (show reflection.chunksRF) <> "\n" <> T.pack (show reflection.finishedRF)
+    Dt.CodeSA code -> "---- Code ---\n" <> code.languageCC <> "\n" <> maybe "No response format name" id code.responseFormatNameCC <> "\n" <> code.textCC
+    Dt.ToolCallSA toolCall -> "---- ToolCall ---\n" <> toolCall.toolNameTC <> "\n" <> toolCall.toolInputTC
     _ -> "---- Unknown ---\n" <> T.pack (show subAction)
 
 
