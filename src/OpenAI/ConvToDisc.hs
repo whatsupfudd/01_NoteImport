@@ -14,7 +14,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.List as L
 import qualified Data.Map.Strict as Mp
 import Data.Map.Strict (Map)
-import Data.Maybe (isNothing)
+import Data.Maybe (isNothing, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -180,7 +180,10 @@ runMsgEnc context mapping childMap nodeEid =
     Just node ->
       let
         updCtxt = case node.messageNd of
-          Nothing -> context { issues = ("node without message: " <> nodeEid) : context.issues }
+          Nothing -> if nodeEid /= "client-created-root" then
+              context { issues = ("node without message: " <> nodeEid) : context.issues }
+            else
+              context
           Just aMsg ->
             case T.toLower aMsg.authorMsg.roleAu of
               "user" -> userMsgAction context aMsg
@@ -199,9 +202,10 @@ finaliseContext context =
     [] -> context { messages = context.messages, issues = reverse context.issues }
     _ ->
       let
-        (asstFsm, newIssues) = parseAsstMsgs context.inList
+        (mbAsstFsm, newIssues) = parseAsstMsgs context.inList
+        updMsgs = maybe context.messages (: context.messages) mbAsstFsm
       in
-      context { messages = asstFsm : context.messages, issues = reverse $ newIssues <> context.issues }
+      context { messages = updMsgs, inList = [], issues = reverse $ newIssues <> context.issues }
 
 
 userMsgAction :: Context -> Cv.MessageDb -> Context
@@ -214,12 +218,13 @@ userMsgAction context msg =
     context { messages = userFsm : context.messages }
   else
     let
-      (asstFsm, newIssues) = parseAsstMsgs context.inList
+      (mbAsstFsm, newIssues) = parseAsstMsgs context.inList
+      newMsgs = userFsm : maybe [] L.singleton mbAsstFsm
     in
-    context { messages = [userFsm, asstFsm] <> context.messages, inList = [], issues = newIssues <> context.issues }
+    context { messages = newMsgs <> context.messages, inList = [], issues = newIssues <> context.issues }
 
 
-parseAsstMsgs :: [Cv.MessageDb] -> (Dt.MessageFsm, [Text])
+parseAsstMsgs :: [Cv.MessageDb] -> (Maybe Dt.MessageFsm, [Text])
 parseAsstMsgs msgs =
   let
     (mbLastMsg, otherMsgs, issues) = extractLastMsg msgs
@@ -232,7 +237,8 @@ parseAsstMsgs msgs =
         response = Just (Dt.ResponseAst { textRA = contentTextV targetMsg.contentsMsg })
         assistantMsg = Dt.AssistantMessage { response = response, attachmentsAM = [], subActions = subActs }
       in
-      (Dt.AssistantMF timing assistantMsg, issues)
+      (Just $ Dt.AssistantMF timing assistantMsg, issues)
+    Nothing -> (Nothing, issues)
   where
   extractLastMsg :: [Cv.MessageDb] -> (Maybe Cv.MessageDb, [Cv.MessageDb], [Text])
   extractLastMsg =
